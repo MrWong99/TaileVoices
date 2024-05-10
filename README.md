@@ -1,3 +1,5 @@
+![Banner](Logo_with_Text.png)
+
 # TaileVoices - Add talking NPCs to your online role-plays
 
 TaileVoices is a platform designed to add some __flavour to your role-playing sessions__.
