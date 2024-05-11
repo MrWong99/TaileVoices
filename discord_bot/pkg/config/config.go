@@ -30,6 +30,18 @@ type Agent struct {
 	Token string
 }
 
+// OpenAI configuration options.
+type OpenAI struct {
+	// Token to access the Discord platform API.
+	Token string
+}
+
+// App encapsulates the entire application config.
+type App struct {
+	OpenAI *OpenAI
+	Agent  *Agent
+}
+
 type ContextKey uint
 
 const (
@@ -44,7 +56,8 @@ func (a *Agent) AddTokenToContext(ctx context.Context) context.Context {
 }
 
 // Load the configuration that is stored in Path().
-func Load() (cfg *Agent, err error) {
+func Load() (cfg *App, err error) {
+	cfg = &App{}
 	var f *os.File
 	f, err = os.Open(path)
 	if err != nil {

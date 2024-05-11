@@ -4,6 +4,9 @@ go 1.22.3
 
 require (
 	github.com/Goscord/goscord v0.0.0-20240321000613-9e75793b051a
+	github.com/oov/audio v0.0.0-20171004131523-88a2be6dbe38
+	github.com/sashabaranov/go-openai v1.23.1
+	gopkg.in/hraban/opus.v2 v2.0.0-20230925203106-0188a62cb302
 	gopkg.in/yaml.v3 v3.0.1
 )
 
