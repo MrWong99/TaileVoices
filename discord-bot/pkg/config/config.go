@@ -36,10 +36,15 @@ type OpenAI struct {
 	Token string
 }
 
+type SpeechToText struct {
+	ModelPath string `yaml:"modelPath"`
+}
+
 // App encapsulates the entire application config.
 type App struct {
-	OpenAI *OpenAI
-	Agent  *Agent
+	OpenAI       OpenAI
+	Agent        Agent
+	SpeechToText SpeechToText `yaml:"speechToText"`
 }
 
 type ContextKey uint

@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/MrWong99/TaileVoices/discord_bot/pkg/oai"
+	"github.com/MrWong99/TaileVoices/discord_bot/pkg/stt"
 	"github.com/bwmarrin/discordgo"
+	"github.com/ggerganov/whisper.cpp/bindings/go/pkg/whisper"
 	"github.com/sashabaranov/go-openai"
 	"gopkg.in/hraban/opus.v2"
 )
@@ -85,6 +87,24 @@ var commandOptions = map[string]advancedCommandOption{
 			return res
 		},
 	},
+	"language": {
+		option: &discordgo.ApplicationCommandOption{
+			Type:        discordgo.ApplicationCommandOptionString,
+			Name:        "language",
+			Description: "The spoken language. Can be set to 'auto' which is a bit slower though.",
+			Required:    true,
+		},
+		resolver: func(options []*discordgo.ApplicationCommandInteractionDataOption) map[string]any {
+			for _, option := range options {
+				if option.Name == "language" {
+					return map[string]any{
+						"language": option.StringValue(),
+					}
+				}
+			}
+			return make(map[string]any)
+		},
+	},
 }
 
 func optionsByName(names ...string) []*discordgo.ApplicationCommandOption {
@@ -119,6 +139,11 @@ var commands = []*discordgo.ApplicationCommand{
 		Name:        "say",
 		Description: "Just joins the voice channel that this command was posted in a says out your text aloud.",
 		Options:     optionsByName("text", "voice"),
+	},
+	{
+		Name:        "transcribe",
+		Description: "Join the voice channel and create per-user transcriptions until stopped.",
+		Options:     optionsByName("language"),
 	},
 }
 
@@ -239,7 +264,7 @@ var handlers = map[string]func(s *discordgo.Session, i *discordgo.InteractionCre
 			}
 		}
 	},
-	"simple-ai": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
+	"transcribe": func(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		data := i.ApplicationCommandData()
 		if !isVoiceChannel(s, i.ChannelID) {
 			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -250,14 +275,91 @@ var handlers = map[string]func(s *discordgo.Session, i *discordgo.InteractionCre
 			})
 			return
 		}
+		resolvedOptions := resolveAllOptions(data.Options, "language")
 
-		resolveAllOptions(data.Options, "simple-character", "voice")
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseUpdateMessage,
 			Data: &discordgo.InteractionResponseData{
-				Content: "This command is not yet implemented...",
+				Content: "Ok let's see what you are talking about.",
 			},
 		})
+
+		transcribe, err := stt.New(resolvedOptions["language"].(string))
+		if err != nil {
+			slog.Error("could not create STT model", "error", err)
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseUpdateMessage,
+				Data: &discordgo.InteractionResponseData{
+					Content: "There was an error setting up the transcriber...",
+				},
+			})
+			return
+		}
+
+		voiceConn, err := s.ChannelVoiceJoin(i.GuildID, i.ChannelID, true, false)
+		if err != nil {
+			slog.Error("could not join voice channel", "error", err)
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseUpdateMessage,
+				Data: &discordgo.InteractionResponseData{
+					Content: "There was an error joining the voice channel...",
+				},
+			})
+			return
+		}
+		defer voiceConn.Disconnect()
+		startTime := time.Now()
+		for {
+			if voiceConn.Ready && voiceConn.OpusRecv != nil {
+				break
+			}
+			if time.Since(startTime) > 5*time.Second {
+				slog.Error("voice channel won't become ready")
+				s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+					Type: discordgo.InteractionResponseUpdateMessage,
+					Data: &discordgo.InteractionResponseData{
+						Content: "There was an error joining the voice channel...",
+					},
+				})
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+
+		decodersPerUser := make(map[uint32]*opus.Decoder)
+
+		for {
+			p, ok := <-voiceConn.OpusRecv
+			if !ok {
+				return
+			}
+			if time.Since(startTime) > 30*time.Second {
+				slog.Info("stopping after 30s")
+				return
+			}
+			decoder := decodersPerUser[p.SSRC]
+			if decoder == nil {
+				decoder, err = newDecoder()
+				if err != nil {
+					slog.Error("could not create Discord decoder", "error", err)
+					return
+				}
+				decodersPerUser[p.SSRC] = decoder
+			}
+			pcmBuf := make([]float32, 7000)
+			n, err := decoder.DecodeFloat32(p.Opus, pcmBuf)
+			if err != nil {
+				if err != nil {
+					slog.Warn("could not decode some audio data", "error", err)
+					continue
+				}
+			}
+			pcmBuf = pcmBuf[:n]
+
+			transcribe.Process(pcmBuf, func(segment whisper.Segment, processingDelay time.Duration) {
+				fmt.Printf("[%s -> %s (%s delay)] %s", segment.Start, segment.End, processingDelay, segment.Text)
+			})
+		}
 	},
 }
 

@@ -29,6 +29,10 @@ func init() {
 	discordEncoder.SetMaxBandwidth(opus.Fullband)
 }
 
+func newDecoder() (*opus.Decoder, error) {
+	return opus.NewDecoder(discordAudioSampleRate, discordAudioChannels)
+}
+
 func isVoiceChannel(s *discordgo.Session, channelID string) bool {
 	channel, err := s.Channel(channelID)
 	if err != nil {

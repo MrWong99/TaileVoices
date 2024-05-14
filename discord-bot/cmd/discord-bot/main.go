@@ -10,6 +10,7 @@ import (
 	"github.com/MrWong99/TaileVoices/discord_bot/pkg/bot"
 	"github.com/MrWong99/TaileVoices/discord_bot/pkg/config"
 	"github.com/MrWong99/TaileVoices/discord_bot/pkg/oai"
+	"github.com/MrWong99/TaileVoices/discord_bot/pkg/stt"
 	"github.com/bwmarrin/discordgo"
 )
 
@@ -27,6 +28,7 @@ func main() {
 	}
 	mainCtx = cfg.Agent.AddTokenToContext(mainCtx)
 	oai.Init(cfg.OpenAI.Token)
+	stt.SetModelPath(cfg.SpeechToText.ModelPath)
 	discordSession, err := discordgo.New("Bot " + cfg.Agent.Token)
 	if err != nil {
 		slog.ErrorContext(mainCtx, "wrong bot params", "error", err)

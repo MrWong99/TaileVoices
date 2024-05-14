@@ -10,7 +10,10 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/discord-bot/cmd/discord-bot/main.go",
-            "cwd": "${workspaceFolder}/discord-bot"
+            "cwd": "${workspaceFolder}/discord-bot",
+            "env": {
+                "CGO_LDFLAGS": "-L/opt/cuda/targets/x86_64-linux/lib/stubs/ -L/opt/cuda/lib64/ -L/usr/lib/wsl/lib/ -lcuda -lcublas -lcudart -lculibos -lcublasLt"
+            }
         }
     ]
 }
