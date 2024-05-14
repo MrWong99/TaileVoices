@@ -9,8 +9,8 @@
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/discord_bot/cmd/agent-example/main.go",
-            "cwd": "${workspaceFolder}/discord_bot"
+            "program": "${workspaceFolder}/discord-bot/cmd/discord-bot/main.go",
+            "cwd": "${workspaceFolder}/discord-bot"
         }
     ]
 }
