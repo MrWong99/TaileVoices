@@ -7,10 +7,10 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/MrWong99/TaileVoices/discord_bot/pkg/audio"
 	"github.com/MrWong99/TaileVoices/discord_bot/pkg/bot"
 	"github.com/MrWong99/TaileVoices/discord_bot/pkg/config"
 	"github.com/MrWong99/TaileVoices/discord_bot/pkg/oai"
-	"github.com/MrWong99/TaileVoices/discord_bot/pkg/stt"
 	"github.com/bwmarrin/discordgo"
 )
 
@@ -27,8 +27,11 @@ func main() {
 		os.Exit(1)
 	}
 	mainCtx = cfg.Agent.AddTokenToContext(mainCtx)
+	if err := audio.LoadSTTModel(cfg.SpeechToText.ModelPath); err != nil {
+		slog.ErrorContext(mainCtx, "could not read STT model", "error", err)
+		os.Exit(1)
+	}
 	oai.Init(cfg.OpenAI.Token)
-	stt.SetModelPath(cfg.SpeechToText.ModelPath)
 	discordSession, err := discordgo.New("Bot " + cfg.Agent.Token)
 	if err != nil {
 		slog.ErrorContext(mainCtx, "wrong bot params", "error", err)

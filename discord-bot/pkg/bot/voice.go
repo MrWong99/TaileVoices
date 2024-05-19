@@ -9,11 +9,14 @@ import (
 )
 
 const (
-	discordAudioSampleRate  = 48000
-	discordAudioChannels    = 2
-	discordAudioFrameSize   = 960
-	discordPcmLength        = discordAudioFrameSize * discordAudioChannels
-	discordAudioFrameSizeMs = 20
+	discordAudioSampleRate       = 48000
+	discordAudioChannels         = 2
+	discordAudioFrameSize        = 960
+	discordPcmLength             = discordAudioFrameSize * discordAudioChannels
+	discordAudioFrameSizeMs      = 20
+	sttSampleDataDurationSeconds = 5
+	sampleDataSize               = (1000 / discordAudioFrameSizeMs) * sttSampleDataDurationSeconds * discordAudioFrameSize * discordAudioChannels
+	minimumSampleDataSize        = (1000 / discordAudioFrameSizeMs) * discordAudioFrameSize * discordAudioChannels
 )
 
 var discordEncoder *opus.Encoder

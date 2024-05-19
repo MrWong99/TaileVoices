@@ -6,6 +6,7 @@ replace github.com/ggerganov/whisper.cpp/bindings/go => ./third_party/whisper.cp
 
 require (
 	github.com/bwmarrin/discordgo v0.28.1
+	github.com/ggerganov/whisper.cpp/bindings/go v0.0.0-20240513123346-4ef8d9f44eb4
 	github.com/oov/audio v0.0.0-20171004131523-88a2be6dbe38
 	github.com/sashabaranov/go-openai v1.23.1
 	gopkg.in/hraban/opus.v2 v2.0.0-20230925203106-0188a62cb302
@@ -13,7 +14,6 @@ require (
 )
 
 require (
-	github.com/ggerganov/whisper.cpp/bindings/go v0.0.0-20240513123346-4ef8d9f44eb4 // indirect
 	github.com/gorilla/websocket v1.5.0 // indirect
 	golang.org/x/crypto v0.17.0 // indirect
 	golang.org/x/sys v0.15.0 // indirect
