@@ -10,11 +10,12 @@ import (
 // Mapping goes Interaction.GuildID -> Component.CustomID
 var componentButtons = make(map[string]map[string]chan *discordgo.Interaction)
 
-var commands = []*discordgo.ApplicationCommand{&sayCommand, &transcribeCommand}
+var commands = []*discordgo.ApplicationCommand{&sayCommand, &transcribeCommand, &recordCommand}
 
 var handlers = map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){
-	"say":        sayHandler,
-	"transcribe": transcribeHandler,
+	sayCommand.Name:        sayHandler,
+	transcribeCommand.Name: transcribeHandler,
+	recordCommand.Name:     recordRawHandler,
 }
 
 // SetupCommands that the session will respond to.
@@ -44,10 +45,8 @@ func SetupCommands(session *discordgo.Session) error {
 			})
 		}
 	})
-	for _, command := range commands {
-		if _, err := session.ApplicationCommandCreate(session.State.User.ID, "", command); err != nil {
-			return fmt.Errorf("could not register command %q: %w", command.Name, err)
-		}
+	if _, err := session.ApplicationCommandBulkOverwrite(session.State.User.ID, "", commands); err != nil {
+		return fmt.Errorf("could not register commands %v: %w", commands, err)
 	}
 	return nil
 }

@@ -61,7 +61,11 @@ func TestTranscribe(t *testing.T) {
 		defer speaker.Close()
 		speaker.Play(toBeep)
 	*/
-	samples, err := Transcribe(audioData, "en")
+	tool, err := NewSTT("en")
+	if err != nil {
+		t.Fatalf("could not initialize transcription context: %v", err)
+	}
+	samples, err := tool.Transcribe(audioData)
 	if err != nil {
 		t.Fatalf("could not transcribe stt sample: %v", err)
 	}

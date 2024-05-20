@@ -2,10 +2,13 @@ package audio
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"os/exec"
 	"strings"
+
+	"golang.org/x/exp/constraints"
 )
 
 // AudioFormat as defined by ffmpeg. There are more,
@@ -98,12 +101,14 @@ func Resample(input *AudioInput, output *AudioOutput) error {
 		outArgs[i] = stringify(v)
 		i++
 	}
-	allArgs := make([]string, 0)
+	allArgs := []string{"-f", strings.ToLower(input.Format.String())}
+	if input.Format == F32le || input.Format == S16le {
+		allArgs = append(allArgs, "-ac", stringify(input.Channels), "-ar", stringify(input.Channels))
+	}
 	allArgs = append(allArgs, "-i", "pipe:")
 	allArgs = append(allArgs, outArgs...)
 	allArgs = append(allArgs, "pipe:")
 	cmd := exec.Command("ffmpeg", allArgs...)
-	fmt.Printf("running command %s", cmd)
 	errBuf := new(bytes.Buffer)
 	cmd.Stdin = input.Data
 	cmd.Stdout = output.Output
@@ -130,6 +135,23 @@ func stringify(s any) string {
 	default:
 		return fmt.Sprintf("%v", t)
 	}
+}
+
+// ReadBytes converts given bytes from reader to a slice of the defined number type.
+func ReadBytes[T constraints.Integer | constraints.Float](reader io.Reader) ([]T, error) {
+	var result []T
+	for {
+		var num T
+		err := binary.Read(reader, binary.LittleEndian, &num)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return result, err
+		}
+		result = append(result, num)
+	}
+	return result, nil
 }
 
 // PcmToWAV converts raw pcm data into WAV.

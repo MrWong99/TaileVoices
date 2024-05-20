@@ -4,13 +4,12 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"io"
 	"log/slog"
 	"time"
 
 	"github.com/MrWong99/TaileVoices/discord_bot/pkg/audio"
 	"github.com/bwmarrin/discordgo"
-	"github.com/ggerganov/whisper.cpp/bindings/go/pkg/whisper"
+	whisper "github.com/ggerganov/whisper.cpp/bindings/go"
 )
 
 var transcribeCommand = discordgo.ApplicationCommand{
@@ -97,9 +96,14 @@ func transcribeHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 	componentButtons[i.GuildID]["stop_transcript"] = make(chan *discordgo.Interaction)
 
-	buffersPerUser := make(map[uint32][]byte)
+	buffersPerUser := make(map[uint32]*bytes.Buffer)
 	usernamesPerSSRC := make(map[uint32]string)
 	previousUserText := make(map[uint32]string)
+	defer func() {
+		clear(buffersPerUser)
+		clear(usernamesPerSSRC)
+		clear(previousUserText)
+	}()
 	var followUpId string
 	var entireTranscript string
 	s.VoiceConnections[voiceConn.GuildID].AddHandler(func(_ *discordgo.VoiceConnection, vs *discordgo.VoiceSpeakingUpdate) {
@@ -146,43 +150,63 @@ func transcribeHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			if !ok {
 				return
 			}
-			buffersPerUser[p.SSRC] = append(buffersPerUser[p.SSRC], p.Opus...)
-		}
-
-		if len(buffersPerUser[p.SSRC]) >= sampleDataSize {
-			audioBuf := bytes.NewBuffer(make([]byte, 0))
-			err := audio.Resample(&audio.AudioInput{
-				Data:       bytes.NewReader(buffersPerUser[p.SSRC]),
-				Channels:   2,
+			pcmBuf := make([]float32, 70000)
+			n, err := discordDecoder.DecodeFloat32(p.Opus, pcmBuf)
+			if err != nil {
+				slog.Warn("could not decode opus voice data", "error", err)
+				continue
+			}
+			pcmBuf = pcmBuf[:n]
+			buf := new(bytes.Buffer)
+			for i := 0; i < len(pcmBuf); i++ {
+				binary.Write(buf, binary.LittleEndian, pcmBuf[i])
+			}
+			resBuf, ok := buffersPerUser[p.SSRC]
+			if !ok {
+				resBuf = new(bytes.Buffer)
+				buffersPerUser[p.SSRC] = resBuf
+			}
+			err = audio.Resample(&audio.AudioInput{
+				Data:       buf,
+				Channels:   discordAudioChannels,
 				SampleRate: discordAudioSampleRate,
-				Format:     audio.Opus,
+				Format:     audio.F32le,
 			}, &audio.AudioOutput{
-				Output:     audioBuf,
+				Output:     resBuf,
 				Channels:   1,
 				SampleRate: whisper.SampleRate,
 				Format:     audio.F32le,
 			})
 			if err != nil {
-				slog.Warn("could not convert Discord Opus data to float32", "error", err)
+				slog.Warn("could not resample package", "error", err)
 				continue
 			}
-			floatAudio, err := byteSliceToFloat32Slice(audioBuf.Bytes())
-			if err != nil {
-				slog.Warn("could not convert []byte to []float32", "error", err)
-				continue
-			}
-			delete(buffersPerUser, p.SSRC)
+		}
+		userBuf, ok := buffersPerUser[p.SSRC]
+		if ok && len(userBuf.Bytes()) >= sampleDataSize {
 			var lang string
 			l, ok := resolvedOptions["language"]
 			language := l.(string)
 			if ok && language != "auto" {
 				lang = language
 			}
-			segments, err := audio.Transcribe(floatAudio, lang)
+			transcriber, err := audio.NewSTT(lang)
+			if err != nil {
+				slog.Error("could not initialize transcriber context: %v", err)
+				return
+			}
+			audio, err := audio.ReadBytes[float32](userBuf)
+			if err != nil {
+				slog.Error("could not read audio buffer: %v", err)
+				return
+			}
+			delete(buffersPerUser, p.SSRC)
+			segments, err := transcriber.Transcribe(audio)
 			if err != nil {
 				slog.Warn("could not trascribe audio sample", "error", err)
 				continue
 			}
+			delete(buffersPerUser, p.SSRC)
 			oldText := previousUserText[p.SSRC]
 			for _, segment := range segments {
 				oldText += ". " + segment.Text
@@ -212,23 +236,4 @@ func transcribeHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			}()
 		}
 	}
-}
-
-func byteSliceToFloat32Slice(src []byte) ([]float32, error) {
-	buf := bytes.NewReader(src)
-
-	var floats []float32
-
-	for {
-		var f float32
-		err := binary.Read(buf, binary.LittleEndian, &f)
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			return floats, err
-		}
-		floats = append(floats, f)
-	}
-	return floats, nil
 }
