@@ -98,8 +98,8 @@ func Resample(input *AudioInput, output *AudioOutput) error {
 		outArgs[i] = stringify(v)
 		i++
 	}
-	allArgs := []string{"-i", "pipe:"}
-	allArgs = append(allArgs, inArgs...)
+	allArgs := make([]string, 0)
+	allArgs = append(allArgs, "-i", "pipe:")
 	allArgs = append(allArgs, outArgs...)
 	allArgs = append(allArgs, "pipe:")
 	cmd := exec.Command("ffmpeg", allArgs...)
@@ -130,4 +130,40 @@ func stringify(s any) string {
 	default:
 		return fmt.Sprintf("%v", t)
 	}
+}
+
+// PcmToWAV converts raw pcm data into WAV.
+func PcmToWAV(pcmData []int16, sampleRate, channels int) ([]byte, error) {
+	// Command to run ffmpeg
+	cmd := exec.Command("ffmpeg",
+		"-f", "s16le",
+		"-ar", fmt.Sprintf("%d", sampleRate),
+		"-ac", fmt.Sprintf("%d", channels),
+		"-i", "pipe:0",
+		"-f", "wav",
+		"pipe:1")
+
+	// Create buffers to hold stdin and stdout
+	inBuf := bytes.NewBuffer(pcmDataToBytes(pcmData))
+	outBuf := &bytes.Buffer{}
+
+	// Set the command's stdin and stdout
+	cmd.Stdin = inBuf
+	cmd.Stdout = outBuf
+
+	// Run the command
+	if err := cmd.Run(); err != nil {
+		return nil, err
+	}
+
+	return outBuf.Bytes(), nil
+}
+
+// Helper function to convert PCM []int16 to []byte
+func pcmDataToBytes(data []int16) []byte {
+	buf := new(bytes.Buffer)
+	for _, v := range data {
+		buf.Write([]byte{byte(v), byte(v >> 8)})
+	}
+	return buf.Bytes()
 }

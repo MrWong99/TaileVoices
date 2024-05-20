@@ -17,5 +17,5 @@ LIBRARY_PATH=${workspaceFolder}/discord-bot/third_party/whisper.cpp/
 This assumes you have Cuda setup. Also to get the ggml-large-v3.bin file you must:
 
 1. Navigate to [third_party/whisper.cpp/bindings/go](./third_party/whisper.cpp/bindings/go/)
-2. Run `make all` once if not done already.
+2. Run `make all` once if not done already. Set `WHISPER_CUDA=1` if you want to use the full power of Nvidia GPUs.
 3. Download the model using `./build/go-model-download --out models/ --timeout 2h30m -- ggml-large-v3`

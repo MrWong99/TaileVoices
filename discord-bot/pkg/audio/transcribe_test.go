@@ -42,6 +42,25 @@ func TestTranscribe(t *testing.T) {
 	if err = binary.Read(buf, binary.LittleEndian, audioData); err != nil {
 		t.Fatalf("read stt sample as float32: %v", err)
 	}
+	/*
+		toBeep := beep.StreamerFunc(func(samples [][2]float64) (n int, ok bool) {
+			if len(audioData) < len(samples) {
+				samples = samples[:len(audioData)]
+			} else {
+				samples = make([][2]float64, len(audioData))
+			}
+			for i, sample := range audioData {
+				samples[i] = [2]float64{
+					float64(sample),
+					float64(sample),
+				}
+			}
+			return len(samples), true
+		})
+		speaker.Init(beep.SampleRate(stt.sampleRate), len(audioData))
+		defer speaker.Close()
+		speaker.Play(toBeep)
+	*/
 	samples, err := Transcribe(audioData, "en")
 	if err != nil {
 		t.Fatalf("could not transcribe stt sample: %v", err)

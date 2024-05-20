@@ -31,6 +31,7 @@ func main() {
 		slog.ErrorContext(mainCtx, "could not read STT model", "error", err)
 		os.Exit(1)
 	}
+	defer audio.UnloadSTTModel()
 	oai.Init(cfg.OpenAI.Token)
 	discordSession, err := discordgo.New("Bot " + cfg.Agent.Token)
 	if err != nil {
