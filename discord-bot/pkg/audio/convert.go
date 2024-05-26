@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"os/exec"
 	"strings"
 
@@ -35,6 +36,8 @@ const (
 
 type AudioInput struct {
 	Data io.Reader
+	// NoArgs can force the channel. sample rate and any other arguments not to be set for ffmpeg command.
+	NoArgs bool
 	// Channels is the count of audio channels (1 = mono; 2 = stereo)
 	Channels int
 	// SampleRate in Hz
@@ -101,8 +104,11 @@ func Resample(input *AudioInput, output *AudioOutput) error {
 		outArgs[i] = stringify(v)
 		i++
 	}
-	allArgs := []string{"-f", strings.ToLower(input.Format.String())}
-	if input.Format == F32le || input.Format == S16le {
+	allArgs := make([]string, 0)
+	if !input.NoArgs {
+		allArgs = append(allArgs, "-f", strings.ToLower(input.Format.String()))
+	}
+	if (input.Format == F32le || input.Format == S16le) && !input.NoArgs {
 		allArgs = append(allArgs, "-ac", stringify(input.Channels), "-ar", stringify(input.Channels))
 	}
 	allArgs = append(allArgs, "-i", "pipe:")
@@ -137,7 +143,7 @@ func stringify(s any) string {
 	}
 }
 
-// ReadBytes converts given bytes from reader to a slice of the defined number type.
+// ReadBytes converts given bytes from reader to a slice of the defined number type in little endianess.
 func ReadBytes[T constraints.Integer | constraints.Float](reader io.Reader) ([]T, error) {
 	var result []T
 	for {
@@ -154,38 +160,32 @@ func ReadBytes[T constraints.Integer | constraints.Float](reader io.Reader) ([]T
 	return result, nil
 }
 
-// PcmToWAV converts raw pcm data into WAV.
-func PcmToWAV(pcmData []int16, sampleRate, channels int) ([]byte, error) {
-	// Command to run ffmpeg
-	cmd := exec.Command("ffmpeg",
-		"-f", "s16le",
-		"-ar", fmt.Sprintf("%d", sampleRate),
-		"-ac", fmt.Sprintf("%d", channels),
-		"-i", "pipe:0",
-		"-f", "wav",
-		"pipe:1")
-
-	// Create buffers to hold stdin and stdout
-	inBuf := bytes.NewBuffer(pcmDataToBytes(pcmData))
-	outBuf := &bytes.Buffer{}
-
-	// Set the command's stdin and stdout
-	cmd.Stdin = inBuf
-	cmd.Stdout = outBuf
-
-	// Run the command
-	if err := cmd.Run(); err != nil {
-		return nil, err
+// ConvertStereoToMono converts stereo PCM data to mono by averaging the channels.
+func ConvertStereoToMono(stereo []float32) []float32 {
+	mono := make([]float32, len(stereo)/2)
+	for i := 0; i < len(stereo); i += 2 {
+		mono[i/2] = (stereo[i] + stereo[i+1]) / 2
 	}
-
-	return outBuf.Bytes(), nil
+	return mono
 }
 
-// Helper function to convert PCM []int16 to []byte
-func pcmDataToBytes(data []int16) []byte {
-	buf := new(bytes.Buffer)
-	for _, v := range data {
-		buf.Write([]byte{byte(v), byte(v >> 8)})
+// ResamplePCM resamples the PCM data from srcRate to dstRate using linear interpolation.
+func ResamplePCM(data []float32, srcRate, dstRate int) []float32 {
+	ratio := float64(srcRate) / float64(dstRate)
+	dstLen := int(math.Ceil(float64(len(data)) / ratio))
+	resampled := make([]float32, dstLen)
+
+	for i := range resampled {
+		srcIndex := float64(i) * ratio
+		intPart := int(srcIndex)
+		fracPart := srcIndex - float64(intPart)
+
+		if intPart+1 < len(data) {
+			resampled[i] = float32(float64(data[intPart])*(1-fracPart) + float64(data[intPart+1])*fracPart)
+		} else {
+			resampled[i] = data[intPart]
+		}
 	}
-	return buf.Bytes()
+
+	return resampled
 }

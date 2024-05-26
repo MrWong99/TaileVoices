@@ -1,189 +1,160 @@
 package uservoice
 
 import (
-	"bytes"
-	"encoding/binary"
-	"fmt"
+	"errors"
 	"log/slog"
-	"sync"
+	"math"
+	"time"
 
 	"github.com/MrWong99/TaileVoices/discord_bot/pkg/audio"
-	whisper "github.com/ggerganov/whisper.cpp/bindings/go/pkg/whisper"
+	"github.com/ggerganov/whisper.cpp/bindings/go/pkg/whisper"
 	"gopkg.in/hraban/opus.v2"
 )
 
-var zeroFloat32 []byte
+var ErrVoiceClosed = errors.New("voice processing has been closed")
 
-func init() {
-	err := binary.Write(bytes.NewBuffer(zeroFloat32), binary.LittleEndian, float32(0))
-	if err != nil {
-		panic(fmt.Errorf("could not store zero value as little endian float32: %w", err))
-	}
+const (
+	minimumAudioLength     = 2 * time.Second // Minimum length of audio to be processed
+	maximumAudioLength     = 5 * time.Second // Maximum length of audio to be processed
+	silenceLengthCutoff    = 1 * time.Second // Length of silence to trigger processing
+	silenceThreshold       = 0.01            // Threshold to consider audio as silence
+	discordAudioSampleRate = 48000           // Discord audio sample rate
+	discordFrameSize       = 960             // Frame size for Discord audio (480 samples * 2 channels)
+)
+
+// TextSegment represents a segment of transcribed text with start and end timestamps.
+type TextSegment struct {
+	Text  string        // Transcribed text
+	Start time.Duration // Start time of the text segment
+	End   time.Duration // End time of the text segment
 }
 
-type VoiceData struct {
-	Username         string
-	Language         string
-	SSRC             int
-	TextSegments     []whisper.Segment
-	sampleRate       int
-	channels         int
-	bufferedAudio    []byte
-	audioBufferMutex *sync.Mutex
-	newVoice         chan []byte
-	previousSegment  *whisper.Segment
-	minimumLength    int
-	maximumLength    int
+// Voice represents a voice processing instance for a single user.
+type Voice struct {
+	Username    string           // Username of the user
+	SSRC        uint32           // SSRC identifier
+	decoder     *opus.Decoder    // Opus decoder
+	stt         *audio.STT       // Speech-to-text processor
+	voiceStart  time.Time        // Start time of the voice processing
+	results     chan TextSegment // Channel to send text segments
+	inputBuffer chan []byte      // Buffer to receive audio data
+	closed      bool             // Flag to indicate if processing is closed
+	lastErr     error            // Last error encountered during processing
 }
 
-// New returns a new VoiceData object for the given user, to be used as audio buffer and trascriber.
-// There will only be errors returned if the opus decoder could not be initialized.
-//
-// The language will be used for transcribing the voice data and can be set to "auto".
-func New(username, language string, ssrc, sampleRate, channels int) (*VoiceData, error) {
-	decoder, err := opus.NewDecoder(sampleRate, channels)
+// NewVoice creates a new Voice instance for a given user.
+func NewVoice(username string, ssrc uint32, language string) (*Voice, error) {
+	dec, err := opus.NewDecoder(discordAudioSampleRate, 2)
 	if err != nil {
 		return nil, err
 	}
-	vd := &VoiceData{
-		bufferedAudio:    make([]byte, 0),
-		audioBufferMutex: new(sync.Mutex),
-		newVoice:         make(chan []byte, 20),
-		TextSegments:     make([]whisper.Segment, 0),
-		Username:         username,
-		Language:         language,
-		SSRC:             ssrc,
-		sampleRate:       sampleRate,
-		channels:         channels,
-		minimumLength:    whisper.SampleRate * 500 * 4,   // 500 frames of float32 data
-		maximumLength:    whisper.SampleRate * 10000 * 4, // 10000 frames of float32 data
+	stt, err := audio.NewSTT(language)
+	if err != nil {
+		return nil, err
 	}
-	go vd.start(decoder)
-	return vd, nil
+	v := &Voice{
+		Username:    username,
+		SSRC:        ssrc,
+		decoder:     dec,
+		stt:         stt,
+		results:     make(chan TextSegment, 10),
+		inputBuffer: make(chan []byte, 10),
+		voiceStart:  time.Now(),
+	}
+	go v.processingLoop()
+	return v, nil
 }
 
-func (vd *VoiceData) start(decoder *opus.Decoder) {
-	counter := 0
+// processingLoop processes incoming audio data and handles transcription.
+func (v *Voice) processingLoop() {
+	audioBuffer := make([]float32, 0, whisper.SampleRate*int(math.Ceil(maximumAudioLength.Seconds())))
+	silenceTicker := time.NewTicker(silenceLengthCutoff)
+	defer silenceTicker.Stop()
 	for {
-		data, ok := <-vd.newVoice
-		if !ok {
+		select {
+		case data, ok := <-v.inputBuffer:
+			if !ok {
+				return
+			}
+			silenceTicker.Reset(silenceLengthCutoff)
+
+			frameAudio := make([]float32, discordFrameSize*2)
+			n, err := v.decoder.DecodeFloat32(data, frameAudio)
+			if err != nil {
+				v.lastErr = err
+				slog.Error("there was an error during decoding", "error", err)
+				continue
+			}
+			frameAudio = frameAudio[:n]
+
+			monoPcm := audio.ConvertStereoToMono(frameAudio)
+			audioBuffer = append(audioBuffer, audio.ResamplePCM(monoPcm, discordAudioSampleRate, whisper.SampleRate)...)
+		case <-silenceTicker.C:
+			// Add a frame of silence directly
+			audioBuffer = append(audioBuffer, make([]float32, 0.1*whisper.SampleRate)...)
+		}
+
+		currentLength := audio.AudioLength(audioBuffer, whisper.SampleRate, 1)
+
+		if currentLength < minimumAudioLength {
+			continue
+		}
+		if currentLength > maximumAudioLength {
+			bufferCopy := make([]float32, len(audioBuffer))
+			copy(bufferCopy, audioBuffer)
+			v.processBuffer(bufferCopy)
+			audioBuffer = make([]float32, 0, whisper.SampleRate*int(math.Ceil(maximumAudioLength.Seconds())))
+			continue
+		}
+		if n := audio.HasEnoughSilence(audioBuffer, silenceLengthCutoff, whisper.SampleRate, 1, silenceThreshold); n != -1 {
+			bufferCopy := make([]float32, n)
+			copy(bufferCopy, audioBuffer[:n])
+			v.processBuffer(bufferCopy)
+			b := make([]float32, len(audioBuffer)-n, whisper.SampleRate*int(math.Ceil(maximumAudioLength.Seconds())))
+			copy(b, audioBuffer[n:])
+			audioBuffer = b
+		}
+	}
+}
+
+// processBuffer processes the audio buffer and sends transcribed segments to the results channel.
+func (v *Voice) processBuffer(audioBuffer []float32) {
+	start := time.Since(v.voiceStart)
+	fullDuration := audio.AudioLength(audioBuffer, whisper.SampleRate, 1)
+	v.stt.TranscribeWithCallback(audioBuffer, func(s whisper.Segment) {
+		if v.closed {
 			return
 		}
-		counter++
-		if err := vd.resampleAndStore(data, decoder); err != nil {
-			slog.Warn("could not resample voice data", "username", vd.Username, "error", err)
-			continue
+		v.results <- TextSegment{
+			Text:  s.Text,
+			Start: start,
+			End:   start + fullDuration,
 		}
-		if counter < 50 {
-			continue
-		}
-		counter = 0
-		splitIndex := vd.goodAudioSplit()
-		if splitIndex == -1 {
-			continue
-		}
-		vd.transcribeUntil(splitIndex)
-	}
-}
-
-func (vd *VoiceData) resampleAndStore(data []byte, decoder *opus.Decoder) error {
-	pcmBuf := make([]float32, 3000)
-	n, err := decoder.DecodeFloat32(data, pcmBuf)
-	if err != nil {
-		return nil
-	}
-	pcmBuf = pcmBuf[:n]
-	inBuf := new(bytes.Buffer)
-	for _, pcm := range pcmBuf {
-		binary.Write(inBuf, binary.LittleEndian, pcm)
-	}
-	outBuf := new(bytes.Buffer)
-	defer func() {
-		vd.audioBufferMutex.Lock()
-		vd.bufferedAudio = append(vd.bufferedAudio, outBuf.Bytes()...)
-		vd.audioBufferMutex.Unlock()
-	}()
-	return audio.Resample(&audio.AudioInput{
-		Data:       inBuf,
-		Channels:   vd.channels,
-		SampleRate: vd.sampleRate,
-		Format:     audio.F32le,
-	}, &audio.AudioOutput{
-		Output:     outBuf,
-		Channels:   1,
-		SampleRate: whisper.SampleRate,
-		Format:     audio.F32le,
 	})
 }
 
-func (vd *VoiceData) goodAudioSplit() int {
-	audioLength := len(vd.bufferedAudio)
-	if audioLength < vd.minimumLength {
-		return -1
+// Process processes given Discord audio data. Returns ErrVoiceClosed if Close() has been called already.
+func (v *Voice) Process(data []byte) error {
+	if v.closed {
+		return ErrVoiceClosed
 	}
-	if audioLength >= vd.maximumLength {
-		return audioLength
-	}
-	framesOfSilence := vd.sampleRate
-	i := 0
-	for ; i < audioLength && framesOfSilence > 0; i += 4 {
-		oneFloatData := vd.bufferedAudio[i : i+5]
-		if bytes.Equal(oneFloatData, zeroFloat32) {
-			framesOfSilence--
-		} else {
-			// Reset
-			framesOfSilence = vd.sampleRate
-		}
-	}
-	if framesOfSilence == 0 {
-		return i
-	}
-	return -1
+	v.inputBuffer <- data
+	return nil
 }
 
-func (vd *VoiceData) transcribeUntil(index int) {
-	vd.audioBufferMutex.Lock()
-	toTranscribe := vd.bufferedAudio[:index]
-	vd.bufferedAudio = vd.bufferedAudio[index:]
-	vd.audioBufferMutex.Unlock()
-	go func() {
-		floatAudio, err := audio.ReadBytes[float32](bytes.NewReader(toTranscribe))
-		if err != nil {
-			slog.Error("could not read audio bytes into float32", "error", err)
-			return
-		}
-		stt, err := audio.NewSTT(vd.Language)
-		if err != nil {
-			slog.Error("could not create new transcription context", "error", err)
-			return
-		}
-		var segments []whisper.Segment
-		if vd.previousSegment == nil {
-			segments, err = stt.Transcribe(floatAudio)
-		} else {
-			segments, err = stt.TranscribeWithPromptAndOffset(floatAudio, vd.previousSegment.Text, vd.previousSegment.End)
-		}
-		if err != nil {
-			slog.Error("could not transcribe audio sample", "error", err)
-			return
-		}
-		lastSegment := segments[len(segments)-1]
-		if lastSegment.Text != "" {
-			vd.previousSegment = &lastSegment
-		}
-		vd.TextSegments = append(vd.TextSegments, segments...)
-	}()
+// C returns the channel that provides text results as soon as they are available. The channel will be closed immediately if Close() is called.
+func (v *Voice) C() <-chan TextSegment {
+	return v.results
 }
 
-// Process given audio data.
-// The audio data must be in Opus format with the sample rate and channel count set with New().
-//
-// This method is safe to be called concurrently but it might block until the internal processing queue has been cleared.
-func (vd *VoiceData) Process(data []byte) {
-	vd.newVoice <- data
+// Close closes the voice recording and its result channel.
+func (v *Voice) Close() {
+	v.closed = true
+	close(v.results)
+	close(v.inputBuffer)
 }
 
-// Close and stop the voice receiver. You can't call process afterwards.
-func (vd *VoiceData) Close() {
-	close(vd.newVoice)
+// Err returns the last error the voice processing encountered, if any.
+func (v *Voice) Err() error {
+	return v.lastErr
 }

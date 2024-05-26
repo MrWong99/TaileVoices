@@ -2,14 +2,12 @@ package bot
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"log/slog"
 	"time"
 
-	"github.com/MrWong99/TaileVoices/discord_bot/pkg/audio"
+	"github.com/MrWong99/TaileVoices/discord_bot/pkg/uservoice"
 	"github.com/bwmarrin/discordgo"
-	whisper "github.com/ggerganov/whisper.cpp/bindings/go"
 )
 
 var transcribeCommand = discordgo.ApplicationCommand{
@@ -96,18 +94,12 @@ func transcribeHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 	componentButtons[i.GuildID]["stop_transcript"] = make(chan *discordgo.Interaction)
 
-	buffersPerUser := make(map[uint32]*bytes.Buffer)
-	usernamesPerSSRC := make(map[uint32]string)
-	previousUserText := make(map[uint32]string)
-	defer func() {
-		clear(buffersPerUser)
-		clear(usernamesPerSSRC)
-		clear(previousUserText)
-	}()
-	var followUpId string
+	voices := make(map[uint32]*uservoice.Voice)
+
 	var entireTranscript string
 	s.VoiceConnections[voiceConn.GuildID].AddHandler(func(_ *discordgo.VoiceConnection, vs *discordgo.VoiceSpeakingUpdate) {
-		if _, ok := usernamesPerSSRC[uint32(vs.SSRC)]; ok {
+		voice, ok := voices[uint32(vs.SSRC)]
+		if !ok || voice.Username != "" {
 			return
 		}
 		var name string
@@ -118,7 +110,7 @@ func transcribeHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		} else {
 			name = user.Username
 		}
-		usernamesPerSSRC[uint32(vs.SSRC)] = name
+		voice.Username = name
 	})
 
 	for {
@@ -133,7 +125,7 @@ func transcribeHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				slog.Info("stopped by user")
 			}()
 			s.InteractionRespond(respI, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionApplicationCommandAutocompleteResult,
+				Type: discordgo.InteractionResponseUpdateMessage,
 				Data: &discordgo.InteractionResponseData{
 					Content: "Transcript finished",
 					Files: []*discordgo.File{
@@ -150,90 +142,28 @@ func transcribeHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			if !ok {
 				return
 			}
-			pcmBuf := make([]float32, 70000)
-			n, err := discordDecoder.DecodeFloat32(p.Opus, pcmBuf)
-			if err != nil {
-				slog.Warn("could not decode opus voice data", "error", err)
-				continue
-			}
-			pcmBuf = pcmBuf[:n]
-			buf := new(bytes.Buffer)
-			for i := 0; i < len(pcmBuf); i++ {
-				binary.Write(buf, binary.LittleEndian, pcmBuf[i])
-			}
-			resBuf, ok := buffersPerUser[p.SSRC]
-			if !ok {
-				resBuf = new(bytes.Buffer)
-				buffersPerUser[p.SSRC] = resBuf
-			}
-			err = audio.Resample(&audio.AudioInput{
-				Data:       buf,
-				Channels:   discordAudioChannels,
-				SampleRate: discordAudioSampleRate,
-				Format:     audio.F32le,
-			}, &audio.AudioOutput{
-				Output:     resBuf,
-				Channels:   1,
-				SampleRate: whisper.SampleRate,
-				Format:     audio.F32le,
-			})
-			if err != nil {
-				slog.Warn("could not resample package", "error", err)
-				continue
-			}
 		}
-		userBuf, ok := buffersPerUser[p.SSRC]
-		if ok && len(userBuf.Bytes()) >= sampleDataSize {
-			var lang string
-			l, ok := resolvedOptions["language"]
-			language := l.(string)
-			if ok && language != "auto" {
-				lang = language
-			}
-			transcriber, err := audio.NewSTT(lang)
+		voice, ok := voices[p.SSRC]
+		if !ok {
+			voice, err = uservoice.NewVoice("", p.SSRC, resolvedOptions["language"].(string))
 			if err != nil {
-				slog.Error("could not initialize transcriber context: %v", err)
-				return
-			}
-			audio, err := audio.ReadBytes[float32](userBuf)
-			if err != nil {
-				slog.Error("could not read audio buffer: %v", err)
-				return
-			}
-			delete(buffersPerUser, p.SSRC)
-			segments, err := transcriber.Transcribe(audio)
-			if err != nil {
-				slog.Warn("could not trascribe audio sample", "error", err)
+				slog.Error("could not create voice receiver", "SSRC", p.SSRC, "error", err)
 				continue
 			}
-			delete(buffersPerUser, p.SSRC)
-			oldText := previousUserText[p.SSRC]
-			for _, segment := range segments {
-				oldText += ". " + segment.Text
-				entireTranscript += fmt.Sprintf("%s: %s\n", usernamesPerSSRC[p.SSRC], segment.Text)
-			}
-			previousUserText[p.SSRC] = oldText
-			if entireTranscript == "" {
-				continue
-			}
-			go func() {
-				if followUpId == "" {
-					msg, err := s.FollowupMessageCreate(i.Interaction, true, &discordgo.WebhookParams{
-						Content: entireTranscript,
-					})
-					if err != nil {
-						slog.Error("could not create interaction response with stop button", "error", err)
-						return
-					}
-					followUpId = msg.ID
-					return
-				}
+			voices[p.SSRC] = voice
+			defer voice.Close()
+			go handleAudio(voice, &entireTranscript)
+		}
+		if err := voice.Process(p.Opus); err != nil {
+			slog.Error("could not process audio data", "SSRC", p.SSRC, "error", err)
+		}
+	}
+}
 
-				// Follow up exists, so edit it
-				s.FollowupMessageEdit(i.Interaction, followUpId, &discordgo.WebhookEdit{
-					Content: &entireTranscript,
-				})
-			}()
-		}
+func handleAudio(voice *uservoice.Voice, transcript *string) {
+	for segment := range voice.C() {
+		s := fmt.Sprintf("[%s -> %s] %s: %s\n", segment.Start, segment.End, voice.Username, segment.Text)
+		fmt.Println(s)
+		*transcript += s
 	}
 }

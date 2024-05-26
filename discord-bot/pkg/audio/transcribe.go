@@ -2,8 +2,7 @@ package audio
 
 import (
 	"errors"
-	"io"
-	"log/slog"
+	"math"
 	"runtime"
 	"time"
 
@@ -48,48 +47,36 @@ func NewSTT(language string) (*STT, error) {
 	}, nil
 }
 
-// Transcribe the given audio data into text segments.
-// The language can be set to "auto" or a 2 character country code (e.g. "us").
-func (stt *STT) Transcribe(audio []float32) ([]whisper.Segment, error) {
-	if err := stt.ctx.Process(audio, nil, nil); err != nil {
-		return nil, err
-	}
-	segments := make([]whisper.Segment, 0)
-	for {
-		next, err := stt.ctx.NextSegment()
-		if err == nil {
-			segments = append(segments, next)
-			continue
-		}
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		slog.Warn("could not transcribe speech segment", "error", err)
-		break
-	}
-	return segments, nil
+// TranscribeWithCallback the given audio data into text segments.
+// The segments will be given to the callback once produced, but their start and end timestamps won't be exact.
+//
+// You can set an offset to influence the start timestamp.
+func (stt *STT) TranscribeWithCallback(audio []float32, segmentCallback whisper.SegmentCallback) error {
+	return stt.ctx.Process(audio, segmentCallback, nil)
 }
 
-// Transcribe the given audio data into text segments and use prompt as reference.
-// The language can be set to "auto" or a 2 character country code (e.g. "us").
-func (stt *STT) TranscribeWithPromptAndOffset(audio []float32, prompt string, offset time.Duration) ([]whisper.Segment, error) {
-	stt.ctx.SetInitialPrompt(prompt)
-	stt.ctx.SetOffset(offset)
-	if err := stt.ctx.Process(audio, nil, nil); err != nil {
-		return nil, err
-	}
-	segments := make([]whisper.Segment, 0)
-	for {
-		next, err := stt.ctx.NextSegment()
-		if err == nil {
-			segments = append(segments, next)
-			continue
+// AudioLength of the given data with set sample rate and channel count.
+func AudioLength(data []float32, sampleRate, channels int) time.Duration {
+	lengthPerChannel := len(data) / channels
+	return time.Second * time.Duration(lengthPerChannel/sampleRate)
+}
+
+// HasEnoughSilence returns the starting index of the last audio sample that is followed by desiredLength of silence or -1 if not enough silence exists.
+func HasEnoughSilence(data []float32, desiredLength time.Duration, sampleRate, channels int, threshold float64) int {
+	// Calculate the number of samples that represent the desired length of silence
+	desiredSamples := int(desiredLength.Seconds()) * sampleRate * channels
+
+	// Iterate through the data backwards to find the silence
+	silentSamples := 0
+	for i := len(data) - 1; i >= 0; i-- {
+		if math.Abs(float64(data[i])) < threshold {
+			silentSamples++
+			if silentSamples >= desiredSamples {
+				return i
+			}
+		} else {
+			silentSamples = 0
 		}
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		slog.Warn("could not transcribe speech segment", "error", err)
-		break
 	}
-	return segments, nil
+	return -1
 }

@@ -10,7 +10,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-var recordCommand = discordgo.ApplicationCommand{
+var recordRawCommand = discordgo.ApplicationCommand{
 	Name:        "record-raw",
 	Description: "Records raw data as send by discord and stores it as float32 pcm",
 }

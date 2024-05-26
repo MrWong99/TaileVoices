@@ -42,8 +42,8 @@ type SpeechToText struct {
 
 // App encapsulates the entire application config.
 type App struct {
-	OpenAI       OpenAI
-	Agent        Agent
+	OpenAI       OpenAI       `yaml:"openAI"`
+	Agent        Agent        `yaml:"agent"`
 	SpeechToText SpeechToText `yaml:"speechToText"`
 }
 
