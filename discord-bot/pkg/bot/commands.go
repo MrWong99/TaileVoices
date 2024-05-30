@@ -10,12 +10,13 @@ import (
 // Mapping goes Interaction.GuildID -> Component.CustomID
 var componentButtons = make(map[string]map[string]chan *discordgo.Interaction)
 
-var commands = []*discordgo.ApplicationCommand{&sayCommand, &transcribeCommand, &recordRawCommand}
+var commands = []*discordgo.ApplicationCommand{&sayCommand, &transcribeCommand, &recordRawCommand, &taileCommand}
 
 var handlers = map[string]func(s *discordgo.Session, i *discordgo.InteractionCreate){
 	sayCommand.Name:        sayHandler,
 	transcribeCommand.Name: transcribeHandler,
 	recordRawCommand.Name:  recordRawHandler,
+	taileCommand.Name:      taileHandler,
 }
 
 // SetupCommands that the session will respond to.

@@ -67,8 +67,9 @@ func TestTrascribeWithCallback(t *testing.T) {
 		if len(allBuf) < whisper.SampleRate*5 {
 			continue
 		}
+		audioLength := AudioLength(allBuf, whisper.SampleRate, 1)
 		wg.Add(1)
-		if err := stt.TranscribeWithCallback(allBuf, samplesCallback); err != nil {
+		if err := stt.TranscribeWithCallback(allBuf, audioLength, samplesCallback); err != nil {
 			t.Errorf("unexpected error during transcribing: %v", err)
 		}
 		allBuf = make([]float32, 0)
@@ -76,7 +77,8 @@ func TestTrascribeWithCallback(t *testing.T) {
 	// Add remaining audio
 	if len(allBuf) > whisper.SampleRate {
 		wg.Add(1)
-		if err := stt.TranscribeWithCallback(allBuf, samplesCallback); err != nil {
+		audioLength := AudioLength(allBuf, whisper.SampleRate, 1)
+		if err := stt.TranscribeWithCallback(allBuf, audioLength, samplesCallback); err != nil {
 			t.Errorf("unexpected error during transcribing: %v", err)
 		}
 	}

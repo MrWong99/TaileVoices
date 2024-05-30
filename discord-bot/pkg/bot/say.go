@@ -44,29 +44,7 @@ func sayHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 	resolvedOptions := resolveAllOptions(data.Options, "text", "voice")
 
-	slog.Info("speech request started")
-	speechResp, err := oai.Client.CreateSpeech(context.Background(), openai.CreateSpeechRequest{
-		Model:          openai.TTSModel1HD,
-		Input:          resolvedOptions["text"].(string),
-		Voice:          resolvedOptions["voice"].(openai.SpeechVoice),
-		ResponseFormat: openai.SpeechResponseFormatOpus,
-		Speed:          1,
-	})
-	if err != nil {
-		slog.Error("could not generate TTS message", "error", err)
-		err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "There was an error generating the TTS message...",
-			},
-		})
-		if err != nil {
-			slog.Warn("could not create interaction response", "error", err)
-		}
-		return
-	}
-	slog.Info("speech returned")
-	opusInput, err := opus.NewStream(speechResp)
+	opusInput, err := createAudioResponse(resolvedOptions["text"].(string), resolvedOptions["voice"].(openai.SpeechVoice))
 	if err != nil {
 		slog.Error("could not stream opus response from OpenAI", "error", err)
 		err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -118,6 +96,27 @@ func sayHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		time.Sleep(50 * time.Millisecond)
 	}
 
+	speakAudio(voiceConn, opusInput)
+}
+
+func createAudioResponse(text string, voice openai.SpeechVoice) (*opus.Stream, error) {
+	slog.Info("speech request started")
+	speechResp, err := oai.Client.CreateSpeech(context.Background(), openai.CreateSpeechRequest{
+		Model:          openai.TTSModel1HD,
+		Input:          text,
+		Voice:          voice,
+		ResponseFormat: openai.SpeechResponseFormatOpus,
+		Speed:          1,
+	})
+	if err != nil {
+		slog.Error("could not generate TTS message", "error", err)
+		return nil, err
+	}
+	slog.Info("speech returned")
+	return opus.NewStream(speechResp)
+}
+
+func speakAudio(voiceConn *discordgo.VoiceConnection, opusInput *opus.Stream) {
 	voiceConn.Speaking(true)
 	defer voiceConn.Speaking(false)
 outer:

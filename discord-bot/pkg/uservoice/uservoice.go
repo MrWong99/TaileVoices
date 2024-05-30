@@ -14,12 +14,12 @@ import (
 var ErrVoiceClosed = errors.New("voice processing has been closed")
 
 const (
-	minimumAudioLength     = 2 * time.Second // Minimum length of audio to be processed
-	maximumAudioLength     = 5 * time.Second // Maximum length of audio to be processed
-	silenceLengthCutoff    = 1 * time.Second // Length of silence to trigger processing
-	silenceThreshold       = 0.01            // Threshold to consider audio as silence
-	discordAudioSampleRate = 48000           // Discord audio sample rate
-	discordFrameSize       = 960             // Frame size for Discord audio (480 samples * 2 channels)
+	minimumAudioLength     = 2 * time.Second  // Minimum length of audio to be processed
+	maximumAudioLength     = 29 * time.Second // Maximum length of audio to be processed
+	silenceLengthCutoff    = 1 * time.Second  // Length of silence to trigger processing
+	silenceThreshold       = 0.01             // Threshold to consider audio as silence
+	discordAudioSampleRate = 48000            // Discord audio sample rate
+	discordFrameSize       = 960              // Frame size for Discord audio (480 samples * 2 channels)
 )
 
 // TextSegment represents a segment of transcribed text with start and end timestamps.
@@ -68,8 +68,12 @@ func NewVoice(username string, ssrc uint32, language string) (*Voice, error) {
 // processingLoop processes incoming audio data and handles transcription.
 func (v *Voice) processingLoop() {
 	audioBuffer := make([]float32, 0, whisper.SampleRate*int(math.Ceil(maximumAudioLength.Seconds())))
+	var audioLength time.Duration
 	silenceTicker := time.NewTicker(silenceLengthCutoff)
 	defer silenceTicker.Stop()
+
+	processSample := false
+
 	for {
 		select {
 		case data, ok := <-v.inputBuffer:
@@ -89,46 +93,42 @@ func (v *Voice) processingLoop() {
 
 			monoPcm := audio.ConvertStereoToMono(frameAudio)
 			audioBuffer = append(audioBuffer, audio.ResamplePCM(monoPcm, discordAudioSampleRate, whisper.SampleRate)...)
+
+			audioLength = audio.AudioLength(audioBuffer, whisper.SampleRate, 1)
 		case <-silenceTicker.C:
-			// Add a frame of silence directly
-			audioBuffer = append(audioBuffer, make([]float32, 0.1*whisper.SampleRate)...)
+			// We only want to append silence if there is any audio present
+			if audioLength == 0 {
+				continue
+			}
+			processSample = true
 		}
 
-		currentLength := audio.AudioLength(audioBuffer, whisper.SampleRate, 1)
-
-		if currentLength < minimumAudioLength {
+		if audioLength < minimumAudioLength && !processSample {
 			continue
 		}
-		if currentLength > maximumAudioLength {
+		if processSample || audioLength > maximumAudioLength {
+			processSample = false
 			bufferCopy := make([]float32, len(audioBuffer))
 			copy(bufferCopy, audioBuffer)
-			v.processBuffer(bufferCopy)
+			v.processBuffer(bufferCopy, audioLength)
 			audioBuffer = make([]float32, 0, whisper.SampleRate*int(math.Ceil(maximumAudioLength.Seconds())))
-			continue
-		}
-		if n := audio.HasEnoughSilence(audioBuffer, silenceLengthCutoff, whisper.SampleRate, 1, silenceThreshold); n != -1 {
-			bufferCopy := make([]float32, n)
-			copy(bufferCopy, audioBuffer[:n])
-			v.processBuffer(bufferCopy)
-			b := make([]float32, len(audioBuffer)-n, whisper.SampleRate*int(math.Ceil(maximumAudioLength.Seconds())))
-			copy(b, audioBuffer[n:])
-			audioBuffer = b
+			audioLength = 0
 		}
 	}
 }
 
 // processBuffer processes the audio buffer and sends transcribed segments to the results channel.
-func (v *Voice) processBuffer(audioBuffer []float32) {
+func (v *Voice) processBuffer(audioBuffer []float32, audioLength time.Duration) {
 	start := time.Since(v.voiceStart)
-	fullDuration := audio.AudioLength(audioBuffer, whisper.SampleRate, 1)
-	v.stt.TranscribeWithCallback(audioBuffer, func(s whisper.Segment) {
+	end := start + audio.AudioLength(audioBuffer, whisper.SampleRate, 1)
+	v.stt.TranscribeWithCallback(audioBuffer, audioLength, func(s whisper.Segment) {
 		if v.closed {
 			return
 		}
 		v.results <- TextSegment{
 			Text:  s.Text,
 			Start: start,
-			End:   start + fullDuration,
+			End:   end,
 		}
 	})
 }

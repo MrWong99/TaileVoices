@@ -31,27 +31,38 @@ type STT struct {
 	ctx      whisper.Context
 }
 
+// NewSTT creates a new speech-to-text context.
 func NewSTT(language string) (*STT, error) {
+	stt := &STT{
+		language: language,
+	}
+	err := stt.newContext()
+	return stt, err
+}
+
+func (s *STT) newContext() error {
 	stt, err := ttsModel.NewContext()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if err = stt.SetLanguage(language); err != nil {
-		return nil, err
+	if err = stt.SetLanguage(s.language); err != nil {
+		return err
 	}
 	stt.SetThreads(uint(runtime.NumCPU()))
 	stt.SetTranslate(false)
-	return &STT{
-		language: language,
-		ctx:      stt,
-	}, nil
+	s.ctx = stt
+	return nil
 }
 
 // TranscribeWithCallback the given audio data into text segments.
 // The segments will be given to the callback once produced, but their start and end timestamps won't be exact.
 //
 // You can set an offset to influence the start timestamp.
-func (stt *STT) TranscribeWithCallback(audio []float32, segmentCallback whisper.SegmentCallback) error {
+func (stt *STT) TranscribeWithCallback(audio []float32, audioLength time.Duration, segmentCallback whisper.SegmentCallback) error {
+	if audioLength < 30*time.Second {
+		missingPadding := (30 * whisper.SampleRate) - len(audio)
+		audio = append(audio, make([]float32, missingPadding)...)
+	}
 	return stt.ctx.Process(audio, segmentCallback, nil)
 }
 
@@ -72,7 +83,7 @@ func HasEnoughSilence(data []float32, desiredLength time.Duration, sampleRate, c
 		if math.Abs(float64(data[i])) < threshold {
 			silentSamples++
 			if silentSamples >= desiredSamples {
-				return i
+				return i + desiredSamples - 1
 			}
 		} else {
 			silentSamples = 0

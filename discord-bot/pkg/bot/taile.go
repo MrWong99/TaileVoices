@@ -2,21 +2,26 @@ package bot
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log/slog"
+	"slices"
+	"strings"
 	"time"
 
+	"github.com/MrWong99/TaileVoices/discord_bot/pkg/oai"
 	"github.com/MrWong99/TaileVoices/discord_bot/pkg/uservoice"
 	"github.com/bwmarrin/discordgo"
+	"github.com/sashabaranov/go-openai"
 )
 
-var transcribeCommand = discordgo.ApplicationCommand{
-	Name:        "transcribe",
-	Description: "Join the voice channel and create per-user transcriptions until stopped.",
+var taileCommand = discordgo.ApplicationCommand{
+	Name:        "taile",
+	Description: "Join the voice channel and be a helpful bot. Activation word is 'Hello Bot'",
 	Options:     optionsByName("language"),
 }
 
-func transcribeHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
+func taileHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	data := i.ApplicationCommandData()
 	if !isVoiceChannel(s, i.ChannelID) {
 		err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
@@ -45,7 +50,7 @@ func transcribeHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 							},
 							Style:    discordgo.DangerButton,
 							Label:    "STOP",
-							CustomID: "stop_transcript",
+							CustomID: "stop_taile",
 						},
 					},
 				},
@@ -57,7 +62,7 @@ func transcribeHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	voiceConn, err := s.ChannelVoiceJoin(i.GuildID, i.ChannelID, true, false)
+	voiceConn, err := s.ChannelVoiceJoin(i.GuildID, i.ChannelID, false, false)
 	if err != nil {
 		msg := "There was an error joining the voice channel..."
 		slog.Error("could not join voice channel", "error", err)
@@ -92,7 +97,7 @@ func transcribeHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	if _, ok := componentButtons[i.GuildID]; !ok {
 		componentButtons[i.GuildID] = make(map[string]chan *discordgo.Interaction)
 	}
-	componentButtons[i.GuildID]["stop_transcript"] = make(chan *discordgo.Interaction)
+	componentButtons[i.GuildID]["stop_taile"] = make(chan *discordgo.Interaction)
 
 	voices := make(map[uint32]*uservoice.Voice)
 	names := make(map[uint32]string)
@@ -123,11 +128,11 @@ func transcribeHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		var p *discordgo.Packet
 		var ok bool
 		select {
-		case respI := <-componentButtons[i.GuildID]["stop_transcript"]:
+		case respI := <-componentButtons[i.GuildID]["stop_taile"]:
 			defer func() {
 				// Cleanup
-				close(componentButtons[i.GuildID]["stop_transcript"])
-				delete(componentButtons[i.GuildID], "stop_transcript")
+				close(componentButtons[i.GuildID]["stop_taile"])
+				delete(componentButtons[i.GuildID], "stop_taile")
 				slog.Info("stopped by user")
 			}()
 			s.InteractionRespond(respI, &discordgo.InteractionResponse{
@@ -159,7 +164,7 @@ func transcribeHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			}
 			voices[p.SSRC] = voice
 			defer voice.Close()
-			go handleAudio(voice, &entireTranscript)
+			go handleTaileAudio(voice, &entireTranscript, voiceConn)
 		}
 		if err := voice.Process(p.Opus); err != nil {
 			slog.Error("could not process audio data", "SSRC", p.SSRC, "error", err)
@@ -167,10 +172,56 @@ func transcribeHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 }
 
-func handleAudio(voice *uservoice.Voice, transcript *string) {
+var activationSamples = []string{
+	"hello bot", "hallo bot", "hola bot", "holá bot",
+	"hello, bot", "hallo, bot", "hola, bot", "holá, bot",
+}
+
+func handleTaileAudio(voice *uservoice.Voice, transcript *string, voiceConn *discordgo.VoiceConnection) {
 	for segment := range voice.C() {
 		s := fmt.Sprintf("[%s -> %s] %s: %s\n", segment.Start, segment.End, voice.Username, segment.Text)
 		fmt.Print(s)
 		*transcript += s
+		lowercase := strings.ToLower(s)
+		if slices.ContainsFunc(activationSamples, func(a string) bool {
+			return strings.Contains(lowercase, a)
+		}) {
+			go askTaile(*transcript, voiceConn)
+		}
 	}
+}
+
+const systemPrompt = `You are a helpful bot called "Bot" that reacts to a transcript to a voice conversation.
+Always try to answer in helpful and funny responses that sound like natural dialog by using "uhm" and "ehm" and so on.
+
+The transcript is not perfect so try to deduce some context or fix the spelling if needed.
+
+You must always answer in the same language as the transcript!`
+
+func askTaile(transcript string, voiceConn *discordgo.VoiceConnection) {
+	resp, err := oai.Client.CreateChatCompletion(context.Background(), openai.ChatCompletionRequest{
+		Model: openai.GPT4o,
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleSystem,
+				Content: systemPrompt,
+			},
+			{
+				Role:    openai.ChatMessageRoleUser,
+				Content: transcript,
+			},
+		},
+	})
+	if err != nil {
+		slog.Error("could not create completion response", "error", err)
+		return
+	}
+
+	o, err := createAudioResponse(resp.Choices[0].Message.Content, openai.VoiceEcho)
+	if err != nil {
+		slog.Error("failed to create audio response", "error", err)
+		return
+	}
+
+	speakAudio(voiceConn, o)
 }
