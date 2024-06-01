@@ -30,12 +30,12 @@ jobs:
 
     - name: Test
       run: go test -v ./...
-      working-directory: discord_bot
+      working-directory: discord-bot
       env:
         LDFLAGS: "-L${{steps.cuda-toolkit.outputs.CUDA_PATH}} -lcuda -lcublas -lcudart -lculibos -lcublasLt"
 
     - name: Build
       run: make go.build
-      working-directory: discord_bot
+      working-directory: discord-bot
       env:
         LDFLAGS: "-L${{steps.cuda-toolkit.outputs.CUDA_PATH}} -lcuda -lcublas -lcudart -lculibos -lcublasLt"
