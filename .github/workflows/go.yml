@@ -28,14 +28,21 @@ jobs:
       with:
         go-version: '1.22.3'
 
-    - name: Test
-      run: go test -v ./...
+    - name: Build
+      run: make setup.whisper
+      working-directory: discord-bot
+      env:
+        LDFLAGS: "-L${{steps.cuda-toolkit.outputs.CUDA_PATH}} -lcuda -lcublas -lcudart -lculibos -lcublasLt"
+        WHISPER_CUDA: 1
+
+    - name: Build
+      run: make go.build
       working-directory: discord-bot
       env:
         LDFLAGS: "-L${{steps.cuda-toolkit.outputs.CUDA_PATH}} -lcuda -lcublas -lcudart -lculibos -lcublasLt"
 
-    - name: Build
-      run: make go.build
+    - name: Test
+      run: go test -v ./...
       working-directory: discord-bot
       env:
         LDFLAGS: "-L${{steps.cuda-toolkit.outputs.CUDA_PATH}} -lcuda -lcublas -lcudart -lculibos -lcublasLt"
