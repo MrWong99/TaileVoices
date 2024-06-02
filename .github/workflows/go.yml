@@ -19,7 +19,7 @@ jobs:
         submodules: 'true'
     
     - name: Install Cuda
-      run: sudo apt -y update && sudo apt -y install nvidia-cuda-toolkit-gcc nvidia-cudnn opus-tools 
+      run: sudo apt -y update && sudo apt -y install nvidia-cuda-toolkit-gcc nvidia-cudnn libopus-dev libopusfile-dev
 
     - name: Set up Go
       uses: actions/setup-go@v4
