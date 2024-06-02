@@ -32,6 +32,7 @@ jobs:
       run: make setup.whisper
       working-directory: discord-bot
       env:
+        CGO_LDFLAGS: "-L${{steps.cuda-toolkit.outputs.CUDA_PATH}} -lcuda -lcublas -lcudart -lculibos -lcublasLt"
         LDFLAGS: "-L${{steps.cuda-toolkit.outputs.CUDA_PATH}} -lcuda -lcublas -lcudart -lculibos -lcublasLt"
         WHISPER_CUDA: 1
 
@@ -39,10 +40,17 @@ jobs:
       run: make go.build
       working-directory: discord-bot
       env:
+        C_INCLUDE_PATH: third_party/whisper.cpp/
+        CGO_LDFLAGS: "-L${{steps.cuda-toolkit.outputs.CUDA_PATH}} -lcuda -lcublas -lcudart -lculibos -lcublasLt"
         LDFLAGS: "-L${{steps.cuda-toolkit.outputs.CUDA_PATH}} -lcuda -lcublas -lcudart -lculibos -lcublasLt"
+        LIBRARY_PATH: third_party/whisper.cpp/
 
     - name: Test
       run: go test -v ./...
       working-directory: discord-bot
       env:
+        C_INCLUDE_PATH: third_party/whisper.cpp/
+        CGO_LDFLAGS: "-L${{steps.cuda-toolkit.outputs.CUDA_PATH}} -lcuda -lcublas -lcudart -lculibos -lcublasLt"
         LDFLAGS: "-L${{steps.cuda-toolkit.outputs.CUDA_PATH}} -lcuda -lcublas -lcudart -lculibos -lcublasLt"
+        LIBRARY_PATH: third_party/whisper.cpp/
+        STT_MODEL_PATH: third_party/whisper.cpp/bindings/go/models/ggml-large-v3.bin
