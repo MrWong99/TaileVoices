@@ -49,6 +49,7 @@ jobs:
       env:
         C_INCLUDE_PATH: third_party/whisper.cpp/
         CGO_LDFLAGS: "-L/opt/cuda/targets/x86_64-linux/lib/stubs/ -L/opt/cuda/lib64/ -lcuda -lcublas -lcudart -lculibos -lcublasLt"
+        CI: 1
         LDFLAGS: "-L/opt/cuda/targets/x86_64-linux/lib/stubs/ -L/opt/cuda/lib64/ -lcuda -lcublas -lcudart -lculibos -lcublasLt"
         LIBRARY_PATH: third_party/whisper.cpp/
         STT_MODEL_PATH: third_party/whisper.cpp/bindings/go/models/ggml-large-v3.bin

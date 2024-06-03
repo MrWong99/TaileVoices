@@ -173,18 +173,17 @@ func taileHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 }
 
 var activationSamples = []string{
-	"hello bot", "hallo bot", "hola bot", "holá bot",
-	"hello, bot", "hallo, bot", "hola, bot", "holá, bot",
+	"hello bot", "hallo bot", "hola bot", "holá bot", "hallo got", "hallo gott", "hello gott",
 }
 
 func handleTaileAudio(voice *uservoice.Voice, transcript *string, voiceConn *discordgo.VoiceConnection) {
 	for segment := range voice.C() {
-		s := fmt.Sprintf("[%s -> %s] %s: %s\n", segment.Start, segment.End, voice.Username, segment.Text)
+		s := fmt.Sprintf("%s: %s\n", voice.Username, segment.Text)
 		fmt.Print(s)
 		*transcript += s
 		lowercase := strings.ToLower(s)
 		if slices.ContainsFunc(activationSamples, func(a string) bool {
-			return strings.Contains(lowercase, a)
+			return strings.Contains(lowercase, strings.ReplaceAll(strings.ReplaceAll(a, ",", ""), ".", ""))
 		}) {
 			go askTaile(*transcript, voiceConn)
 		}

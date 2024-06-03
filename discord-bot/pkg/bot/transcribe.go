@@ -169,7 +169,7 @@ func transcribeHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 
 func handleAudio(voice *uservoice.Voice, transcript *string) {
 	for segment := range voice.C() {
-		s := fmt.Sprintf("[%s -> %s] %s: %s\n", segment.Start, segment.End, voice.Username, segment.Text)
+		s := fmt.Sprintf("%s: %s\n", voice.Username, segment.Text)
 		fmt.Print(s)
 		*transcript += s
 	}
