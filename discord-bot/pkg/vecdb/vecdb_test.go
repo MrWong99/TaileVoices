@@ -46,6 +46,15 @@ func TestStoreAndRetrieve(t *testing.T) {
 		t.Fatalf("could not store text data: %v", err)
 	}
 
+	index, err := DefaultClient().HighestChunkIndex(colName)
+	if err != nil {
+		t.Fatalf("could not get chunk index: %v", err)
+	}
+
+	if index != 97 {
+		t.Errorf("expected highest index to be 97 and not %d", index)
+	}
+
 	result, err := DefaultClient().PromptText(colName, "Was hat Amon an diesem Tag alles erledigt? Antworte in ganz kurzen Stichpunkten!", "Amon")
 	if err != nil {
 		t.Fatalf("could not prompt text data: %v", err)

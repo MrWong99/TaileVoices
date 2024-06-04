@@ -27,6 +27,7 @@ const (
 	clientStartupTimeout = 3 * time.Second
 	textChunkSize        = 200
 	textChunkOverlap     = 50
+	chunkRequestLimit    = 3000 / textChunkSize
 )
 
 var defaultClient *Client
@@ -73,35 +74,43 @@ func (c *Client) StoreText(collectionName, text string) error {
 		chunks = append(chunks, strings.Join(words[i:], " "))
 	}
 
+	highestCurrentIndex := 0
+	collectionExists := false
 	_, err := c.wc.Schema().ClassGetter().WithClassName(collectionName).Do(context.Background())
 	if err == nil {
-		return errors.New("collection already exists")
+		collectionExists = true
+		highestCurrentIndex, err = c.HighestChunkIndex(collectionName)
+		if err != nil {
+			return err
+		}
 	} else if weaveErr, ok := err.(*fault.WeaviateClientError); !ok || weaveErr.StatusCode != 404 {
 		// Unexpected or not 404 error means something went terribly wrong
 		return weaveErr
 	}
 
-	err = c.wc.Schema().ClassCreator().WithClass(&models.Class{
-		Class: collectionName,
-		Properties: []*models.Property{
-			{
-				Name:     string(Chunk),
-				DataType: []string{"text"},
+	if !collectionExists {
+		err = c.wc.Schema().ClassCreator().WithClass(&models.Class{
+			Class: collectionName,
+			Properties: []*models.Property{
+				{
+					Name:     string(Chunk),
+					DataType: []string{"text"},
+				},
+				{
+					Name:     string(ChunkIndex),
+					DataType: []string{"int"},
+				},
 			},
-			{
-				Name:     string(ChunkIndex),
-				DataType: []string{"int"},
+			Vectorizer: "text2vec-openai",
+			ModuleConfig: map[string]any{
+				"generative-openai": map[string]any{
+					"model": "gpt-4",
+				},
 			},
-		},
-		Vectorizer: "text2vec-openai",
-		ModuleConfig: map[string]any{
-			"generative-openai": map[string]any{
-				"model": "gpt-4",
-			},
-		},
-	}).Do(context.Background())
-	if err != nil {
-		return err
+		}).Do(context.Background())
+		if err != nil {
+			return err
+		}
 	}
 
 	batchJob := c.wc.Batch().ObjectsBatcher()
@@ -112,7 +121,7 @@ func (c *Client) StoreText(collectionName, text string) error {
 			Class: collectionName,
 			Properties: map[string]any{
 				string(Chunk):      chunk,
-				string(ChunkIndex): i,
+				string(ChunkIndex): i + highestCurrentIndex,
 			},
 		}
 	}
@@ -121,13 +130,37 @@ func (c *Client) StoreText(collectionName, text string) error {
 	return err
 }
 
+// HighestChunkIndex for given collection.
+func (c *Client) HighestChunkIndex(collectionName string) (int, error) {
+	indexRes, err := c.wc.GraphQL().Get().
+		WithClassName(collectionName).
+		WithFields(graphql.Field{Name: string(ChunkIndex)}).
+		WithSort(graphql.Sort{Path: []string{string(ChunkIndex)}, Order: graphql.Desc}).
+		WithLimit(1).
+		Do(context.Background())
+	if err != nil {
+		return -1, err
+	}
+	if len(indexRes.Errors) > 0 {
+		for _, e := range indexRes.Errors {
+			err = errors.Join(err, errors.New(e.Message))
+		}
+		return -1, err
+	}
+
+	get := indexRes.Data["Get"].(map[string]interface{})
+	col := get[collectionName].([]interface{})
+
+	return int(col[0].(map[string]any)[string(ChunkIndex)].(float64)), nil
+}
+
 // PromptText performs a RAG query against the given collection by applying the prompt to each value matching the concepts.
 func (c *Client) PromptText(collectionName, prompt string, searchConcepts ...string) (string, error) {
 	res, err := c.wc.GraphQL().Get().
 		WithClassName(collectionName).
 		WithFields(graphql.Field{Name: string(Chunk)}).
 		WithNearText(c.wc.GraphQL().NearTextArgBuilder().WithConcepts(searchConcepts)).
-		WithLimit(3000 / textChunkSize).
+		WithLimit(chunkRequestLimit).
 		WithGenerativeSearch(graphql.NewGenerativeSearch().GroupedResult(prompt)).
 		Do(context.Background())
 	if err != nil {
