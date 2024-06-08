@@ -97,6 +97,24 @@ var commandOptions = map[string]advancedCommandOption{
 			return make(map[string]any)
 		},
 	},
+	"campaign": {
+		option: &discordgo.ApplicationCommandOption{
+			Type:        discordgo.ApplicationCommandOptionString,
+			Name:        "campaign",
+			Description: "The name of your pen & paper campaign. This determines the DB.",
+			Required:    true,
+		},
+		resolver: func(options []*discordgo.ApplicationCommandInteractionDataOption) map[string]any {
+			for _, option := range options {
+				if option.Name == "campaign" {
+					return map[string]any{
+						"campaign": option.StringValue(),
+					}
+				}
+			}
+			return make(map[string]any)
+		},
+	},
 }
 
 func optionsByName(names ...string) []*discordgo.ApplicationCommandOption {

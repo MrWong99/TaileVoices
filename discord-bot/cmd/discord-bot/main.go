@@ -11,6 +11,7 @@ import (
 	"github.com/MrWong99/TaileVoices/discord_bot/pkg/bot"
 	"github.com/MrWong99/TaileVoices/discord_bot/pkg/config"
 	"github.com/MrWong99/TaileVoices/discord_bot/pkg/oai"
+	"github.com/MrWong99/TaileVoices/discord_bot/pkg/vecdb"
 	"github.com/bwmarrin/discordgo"
 )
 
@@ -33,6 +34,12 @@ func main() {
 	}
 	defer audio.UnloadSTTModel()
 	oai.Init(cfg.OpenAI.Token)
+	db, err := vecdb.NewClient(cfg.Weaviate.Scheme, cfg.Weaviate.Address)
+	if err != nil {
+		slog.ErrorContext(mainCtx, "could not setup vector db", "error", err)
+		os.Exit(1)
+	}
+	vecdb.SetDefaultClient(db)
 	discordSession, err := discordgo.New("Bot " + cfg.Agent.Token)
 	if err != nil {
 		slog.ErrorContext(mainCtx, "wrong bot params", "error", err)

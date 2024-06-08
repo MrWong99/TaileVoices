@@ -11,6 +11,7 @@ import (
 
 	"github.com/MrWong99/TaileVoices/discord_bot/pkg/oai"
 	"github.com/MrWong99/TaileVoices/discord_bot/pkg/uservoice"
+	"github.com/MrWong99/TaileVoices/discord_bot/pkg/vecdb"
 	"github.com/bwmarrin/discordgo"
 	"github.com/sashabaranov/go-openai"
 )
@@ -18,7 +19,7 @@ import (
 var taileCommand = discordgo.ApplicationCommand{
 	Name:        "taile",
 	Description: "Join the voice channel and be a helpful bot. Activation word is 'Hello Bot'",
-	Options:     optionsByName("language"),
+	Options:     optionsByName("campaign", "language"),
 }
 
 func taileHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -35,7 +36,7 @@ func taileHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		}
 		return
 	}
-	resolvedOptions := resolveAllOptions(data.Options, "language")
+	resolvedOptions := resolveAllOptions(data.Options, "campaign", "language")
 
 	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -130,6 +131,9 @@ func taileHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		select {
 		case respI := <-componentButtons[i.GuildID]["stop_taile"]:
 			defer func() {
+				if err := vecdb.DefaultClient().StoreText(resolvedOptions["campaign"].(string), entireTranscript); err != nil {
+					slog.Warn("unexpected error while storing transcript in vector db", "campaign", resolvedOptions["campaign"], "error", err)
+				}
 				// Cleanup
 				close(componentButtons[i.GuildID]["stop_taile"])
 				delete(componentButtons[i.GuildID], "stop_taile")
@@ -190,10 +194,13 @@ func handleTaileAudio(voice *uservoice.Voice, transcript *string, voiceConn *dis
 	}
 }
 
-const systemPrompt = `You are a helpful bot called "Bot" that reacts to a transcript to a voice conversation.
-Always try to answer in helpful and funny responses that sound like natural dialog by using "uhm" and "ehm" and so on.
+const systemPrompt = `You are a helpful bot that reacts to a transcript to a voice conversation.
+Always try to answer in helpful and funny responses that sound like natural dialog.
+Keep your answers short.
 
 The transcript is not perfect so try to deduce some context or fix the spelling if needed.
+Always provide answers for the last question or request in the transcript that is adressed to you.
+Ignore questions asked before that, just use the rest of the transcript as context info.
 
 You must always answer in the same language as the transcript!`
 

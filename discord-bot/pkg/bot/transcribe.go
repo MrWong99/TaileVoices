@@ -7,13 +7,14 @@ import (
 	"time"
 
 	"github.com/MrWong99/TaileVoices/discord_bot/pkg/uservoice"
+	"github.com/MrWong99/TaileVoices/discord_bot/pkg/vecdb"
 	"github.com/bwmarrin/discordgo"
 )
 
 var transcribeCommand = discordgo.ApplicationCommand{
 	Name:        "transcribe",
 	Description: "Join the voice channel and create per-user transcriptions until stopped.",
-	Options:     optionsByName("language"),
+	Options:     optionsByName("campaign", "language"),
 }
 
 func transcribeHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -30,7 +31,7 @@ func transcribeHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		}
 		return
 	}
-	resolvedOptions := resolveAllOptions(data.Options, "language")
+	resolvedOptions := resolveAllOptions(data.Options, "campaign", "language")
 
 	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -125,6 +126,9 @@ func transcribeHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		select {
 		case respI := <-componentButtons[i.GuildID]["stop_transcript"]:
 			defer func() {
+				if err := vecdb.DefaultClient().StoreText(resolvedOptions["campaign"].(string), entireTranscript); err != nil {
+					slog.Warn("unexpected error while storing transcript in vector db", "campaign", resolvedOptions["campaign"], "error", err)
+				}
 				// Cleanup
 				close(componentButtons[i.GuildID]["stop_transcript"])
 				delete(componentButtons[i.GuildID], "stop_transcript")

@@ -9,6 +9,7 @@ require (
 	github.com/ggerganov/whisper.cpp/bindings/go v0.0.0-20240525074622-a7dc2aab1682
 	github.com/oov/audio v0.0.0-20171004131523-88a2be6dbe38
 	github.com/sashabaranov/go-openai v1.24.1
+	github.com/weaviate/weaviate v1.25.1
 	github.com/weaviate/weaviate-go-client/v4 v4.14.0
 	golang.org/x/exp v0.0.0-20240525044651-4c93da0ed11d
 	gopkg.in/hraban/opus.v2 v2.0.0-20230925203106-0188a62cb302
@@ -35,7 +36,6 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/oklog/ulid v1.3.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/weaviate/weaviate v1.25.1 // indirect
 	go.mongodb.org/mongo-driver v1.14.0 // indirect
 	golang.org/x/crypto v0.23.0 // indirect
 	golang.org/x/net v0.25.0 // indirect

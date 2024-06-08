@@ -36,6 +36,11 @@ type OpenAI struct {
 	Token string
 }
 
+type Weaviate struct {
+	Scheme  string
+	Address string
+}
+
 type SpeechToText struct {
 	ModelPath string `yaml:"modelPath"`
 }
@@ -45,6 +50,7 @@ type App struct {
 	OpenAI       OpenAI       `yaml:"openAI"`
 	Agent        Agent        `yaml:"agent"`
 	SpeechToText SpeechToText `yaml:"speechToText"`
+	Weaviate     Weaviate     `yaml:"weaviate"`
 }
 
 type ContextKey uint

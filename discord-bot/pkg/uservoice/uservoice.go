@@ -14,12 +14,12 @@ import (
 var ErrVoiceClosed = errors.New("voice processing has been closed")
 
 const (
-	minimumAudioLength     = 2 * time.Second  // Minimum length of audio to be processed
-	maximumAudioLength     = 29 * time.Second // Maximum length of audio to be processed
-	silenceLengthCutoff    = 1 * time.Second  // Length of silence to trigger processing
-	silenceThreshold       = 0.01             // Threshold to consider audio as silence
-	discordAudioSampleRate = 48000            // Discord audio sample rate
-	discordFrameSize       = 960              // Frame size for Discord audio (480 samples * 2 channels)
+	minimumAudioLength     = 2 * time.Second        // Minimum length of audio to be processed
+	maximumAudioLength     = 29 * time.Second       // Maximum length of audio to be processed
+	silenceLengthCutoff    = 500 * time.Millisecond // Length of silence to trigger processing
+	silenceThreshold       = 0.01                   // Threshold to consider audio as silence
+	discordAudioSampleRate = 48000                  // Discord audio sample rate
+	discordFrameSize       = 960                    // Frame size for Discord audio (480 samples * 2 channels)
 )
 
 // TextSegment represents a segment of transcribed text with start and end timestamps.
