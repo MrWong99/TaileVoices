@@ -1,14 +1,51 @@
 package pnp
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand"
 	"sync"
+	"text/template"
 
 	"github.com/MrWong99/TaileVoices/discord_bot/pkg/vecdb"
 	"gopkg.in/yaml.v3"
+
+	_ "embed"
 )
+
+//go:embed stt_init_prompt.tpl
+var sttPromptText string
+
+var sttPromptTemplate *template.Template
+
+func init() {
+	var err error
+	// Check if the system prompt template can be resolved.
+	sttPromptTemplate, err = template.New("sttInit").Parse(sttPromptText)
+	if err != nil {
+		panic(fmt.Errorf("could not parse STT init prompt template: %w", err))
+	}
+	sampleCampaign := Campaign{
+		Name: "Test Me",
+		Players: map[string]string{
+			"test": "Me",
+		},
+		Actors: []*Actor{
+			{
+				Name: "Foo",
+			},
+			{
+				Name: "Bar",
+			},
+		},
+	}
+	err = sttPromptTemplate.Execute(io.Discard, sampleCampaign)
+	if err != nil {
+		panic(fmt.Errorf("STT init prompt template can not be executed: %w", err))
+	}
+}
 
 // ActorResponse that will be passed to the campaigns output chan.
 type ActorResponse struct {
@@ -22,6 +59,8 @@ type ActorResponse struct {
 type Campaign struct {
 	// Name of this campaign. Will be used for the vector DB.
 	Name string `yaml:"name"`
+	// Players mapping between Discord user ID and actual ingame name.
+	Players map[string]string `yaml:"players"`
 	// Actors involved in the current session.
 	Actors []*Actor `yaml:"actors"`
 	// CurrentSessionTranscript of the running session. Will be stored in the vector DB once Close() is called.
@@ -32,9 +71,10 @@ type Campaign struct {
 }
 
 type tmpCampaign struct {
-	Name                     string   `yaml:"name"`
-	Actors                   []*Actor `yaml:"actors"`
-	CurrentSessionTranscript string   `yaml:"transcript"`
+	Name                     string            `yaml:"name"`
+	Players                  map[string]string `yaml:"players"`
+	Actors                   []*Actor          `yaml:"actors"`
+	CurrentSessionTranscript string            `yaml:"transcript"`
 }
 
 // UnmarshalYAML implements the unmarshalling including the required initialization.
@@ -46,6 +86,7 @@ func (c *Campaign) UnmarshalYAML(value *yaml.Node) error {
 	}
 
 	c.Name = tmpCampaign.Name
+	c.Players = tmpCampaign.Players
 	c.Actors = tmpCampaign.Actors
 	c.CurrentSessionTranscript = tmpCampaign.CurrentSessionTranscript
 	c.dbClient = vecdb.DefaultClient()
@@ -72,6 +113,10 @@ func NewCampaign(name string, actors []*Actor, dbClient *vecdb.Client) *Campaign
 //	name: <name of the campaign>
 //	transcript: |-
 //	  <transcript of the current session. can be omitted>
+//	players:
+//	  player1discordn4me: Some Character
+//	  pl4yer2: Foo Name
+//	  lastpla1er: GameMaster
 //	actors:
 //	  - name: <name of the first actor>
 //	    aliases: # can be omitted
@@ -95,6 +140,19 @@ func CampaignFromYaml(data []byte) (*Campaign, error) {
 // The actor responses returned in C will automatically be fed into HandleText() so the caller of C SHOULD NOT call HandleText for the responses.
 func (c *Campaign) C() <-chan ActorResponse {
 	return c.actorResponses
+}
+
+// PlayerName of the player with given Discord user ID as registered in the campaign.
+func (c *Campaign) PlayerName(userID string) (name string, ok bool) {
+	name, ok = c.Players[userID]
+	return
+}
+
+// STTPrompt that should be fed to the STT context for better name recognition.
+func (c *Campaign) STTPrompt() (string, error) {
+	promptBuf := bytes.NewBuffer(make([]byte, 0))
+	err := sttPromptTemplate.Execute(promptBuf, *c)
+	return promptBuf.String(), err
 }
 
 // HandleText spoken by a person or NPC actor.
@@ -156,6 +214,7 @@ func (c *Campaign) HandleText(name string, segment string) {
 func (c *Campaign) Close() error {
 	close(c.actorResponses)
 	c.transcriptMu.Lock()
+	fmt.Printf("storing transcript for campaign %q\n%s\n", c.Name, c.CurrentSessionTranscript)
 	defer c.transcriptMu.Unlock()
 	return c.dbClient.StoreText(c.Name, c.CurrentSessionTranscript)
 }

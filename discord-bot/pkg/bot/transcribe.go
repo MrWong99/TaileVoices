@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/MrWong99/TaileVoices/discord_bot/pkg/audio"
 	"github.com/MrWong99/TaileVoices/discord_bot/pkg/uservoice"
 	"github.com/MrWong99/TaileVoices/discord_bot/pkg/vecdb"
 	"github.com/bwmarrin/discordgo"
@@ -33,7 +34,22 @@ func transcribeHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 	resolvedOptions := resolveAllOptions(data.Options, "campaign", "language")
 
-	err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+	stt, err := audio.NewSTT(resolvedOptions["language"].(string), "")
+	if err != nil {
+		slog.Error("could not start STT context", "error", err)
+		err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "Could not start transcript context",
+			},
+		})
+		if err != nil {
+			slog.Warn("could not create interaction response", "error", err)
+		}
+		return
+	}
+
+	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{
 			Content: "Ok let's see what you are talking about.",
@@ -156,7 +172,7 @@ func transcribeHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		voice, ok := voices[p.SSRC]
 		if !ok {
 			name := names[p.SSRC]
-			voice, err = uservoice.NewVoice(name, p.SSRC, resolvedOptions["language"].(string))
+			voice, err = uservoice.NewVoice(name, p.SSRC, stt)
 			if err != nil {
 				slog.Error("could not create voice receiver", "SSRC", p.SSRC, "error", err)
 				continue

@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/MrWong99/TaileVoices/discord_bot/pkg/audio"
 	"github.com/MrWong99/TaileVoices/discord_bot/pkg/pnp"
 	"github.com/MrWong99/TaileVoices/discord_bot/pkg/uservoice"
 	"github.com/bwmarrin/discordgo"
@@ -61,6 +62,26 @@ func campaignHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		}
 		return
 	}
+	sttPrompt, err := campaign.STTPrompt()
+	if err != nil {
+		slog.Warn("error while parsing STT init prompt", "campaign", campaign.Name, "error", err)
+	}
+
+	stt, err := audio.NewSTT(resolvedOptions["language"].(string), sttPrompt)
+	if err != nil {
+		slog.Error("could not start STT context", "error", err)
+		err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "Could not start transcript context",
+			},
+		})
+		if err != nil {
+			slog.Warn("could not create interaction response", "error", err)
+		}
+		return
+	}
+	defer stt.Close()
 
 	err = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -127,10 +148,10 @@ func campaignHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	componentButtons[i.GuildID]["stop_campaign"] = make(chan *discordgo.Interaction)
 
 	voices := make(map[uint32]*uservoice.Voice)
-	names := make(map[uint32]string)
+	userIDs := make(map[uint32]string)
 
 	s.VoiceConnections[voiceConn.GuildID].AddHandler(func(_ *discordgo.VoiceConnection, vs *discordgo.VoiceSpeakingUpdate) {
-		_, ok := names[uint32(vs.SSRC)]
+		_, ok := userIDs[uint32(vs.SSRC)]
 		if ok {
 			return
 		}
@@ -142,12 +163,17 @@ func campaignHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		} else {
 			name = user.Username
 		}
-		names[uint32(vs.SSRC)] = name
+		mappedName, ok := campaign.PlayerName(name)
+		if !ok {
+			slog.Warn("user speaking that has no name mapping", "campaign", campaign.Name, "user", name)
+			mappedName = name
+		}
+		userIDs[uint32(vs.SSRC)] = mappedName
 		voice, ok := voices[uint32(vs.SSRC)]
 		if !ok {
 			return
 		}
-		voice.Username = name
+		voice.Username = mappedName
 	})
 
 	for {
@@ -185,8 +211,13 @@ func campaignHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		}
 		voice, ok := voices[p.SSRC]
 		if !ok {
-			name := names[p.SSRC]
-			voice, err = uservoice.NewVoice(name, p.SSRC, resolvedOptions["language"].(string))
+			uid := userIDs[p.SSRC]
+			name, ok := campaign.PlayerName(uid)
+			if !ok {
+				slog.Warn("user speaking that has no name mapping", "campaign", campaign.Name, "userID", uid)
+				name = uid
+			}
+			voice, err = uservoice.NewVoice(name, p.SSRC, stt)
 			if err != nil {
 				slog.Error("could not create voice receiver", "SSRC", p.SSRC, "error", err)
 				continue

@@ -3,7 +3,6 @@ package audio
 import (
 	"errors"
 	"math"
-	"runtime"
 	"time"
 
 	"github.com/ggerganov/whisper.cpp/bindings/go/pkg/whisper"
@@ -26,18 +25,41 @@ func UnloadSTTModel() error {
 // ErrModelNotLoaded will be returned when Transcribe was called but no model is loaded.
 var ErrModelNotLoaded = errors.New("call LoadSTTModel() first before Transcribe()")
 
+type transcribeData struct {
+	audio           []float32
+	audioLength     time.Duration
+	segmentCallback whisper.SegmentCallback
+}
+
 type STT struct {
-	language string
-	ctx      whisper.Context
+	language        string
+	prompt          string
+	ctx             whisper.Context
+	processingQueue chan transcribeData
+	errQueue        chan error
 }
 
 // NewSTT creates a new speech-to-text context.
-func NewSTT(language string) (*STT, error) {
+func NewSTT(language, initializationPrompt string) (*STT, error) {
 	stt := &STT{
-		language: language,
+		language:        language,
+		prompt:          initializationPrompt,
+		processingQueue: make(chan transcribeData),
+		errQueue:        make(chan error),
 	}
 	err := stt.newContext()
+	go stt.handleData()
 	return stt, err
+}
+
+func (s *STT) handleData() {
+	for d := range s.processingQueue {
+		if d.audioLength < 30*time.Second {
+			missingPadding := (30 * whisper.SampleRate) - len(d.audio)
+			d.audio = append(d.audio, make([]float32, missingPadding)...)
+		}
+		s.errQueue <- s.ctx.Process(d.audio, d.segmentCallback, nil)
+	}
 }
 
 func (s *STT) newContext() error {
@@ -48,7 +70,9 @@ func (s *STT) newContext() error {
 	if err = stt.SetLanguage(s.language); err != nil {
 		return err
 	}
-	stt.SetThreads(uint(runtime.NumCPU()))
+	if s.prompt != "" {
+		stt.SetInitialPrompt(s.prompt)
+	}
 	stt.SetTranslate(false)
 	s.ctx = stt
 	return nil
@@ -59,11 +83,12 @@ func (s *STT) newContext() error {
 //
 // You can set an offset to influence the start timestamp.
 func (stt *STT) TranscribeWithCallback(audio []float32, audioLength time.Duration, segmentCallback whisper.SegmentCallback) error {
-	if audioLength < 30*time.Second {
-		missingPadding := (30 * whisper.SampleRate) - len(audio)
-		audio = append(audio, make([]float32, missingPadding)...)
+	stt.processingQueue <- transcribeData{
+		audio:           audio,
+		audioLength:     audioLength,
+		segmentCallback: segmentCallback,
 	}
-	return stt.ctx.Process(audio, segmentCallback, nil)
+	return <-stt.errQueue
 }
 
 // AudioLength of the given data with set sample rate and channel count.
@@ -90,4 +115,10 @@ func HasEnoughSilence(data []float32, desiredLength time.Duration, sampleRate, c
 		}
 	}
 	return -1
+}
+
+// Close the data processing channels. Calling TranscribeWithCallback after Close will result in errors.
+func (s *STT) Close() {
+	close(s.errQueue)
+	close(s.processingQueue)
 }

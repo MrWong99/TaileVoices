@@ -32,7 +32,7 @@ func TestTrascribeWithCallback(t *testing.T) {
 		t.Fatalf("could not create Discord decoder: %v", err)
 	}
 	// STT for transcriptions with callback
-	stt, err := NewSTT("de")
+	stt, err := NewSTT("de", "")
 	if err != nil {
 		t.Fatalf("could not create STT context: %v", err)
 	}

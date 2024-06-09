@@ -43,12 +43,8 @@ type Voice struct {
 }
 
 // NewVoice creates a new Voice instance for a given user.
-func NewVoice(username string, ssrc uint32, language string) (*Voice, error) {
+func NewVoice(username string, ssrc uint32, stt *audio.STT) (*Voice, error) {
 	dec, err := opus.NewDecoder(discordAudioSampleRate, 2)
-	if err != nil {
-		return nil, err
-	}
-	stt, err := audio.NewSTT(language)
 	if err != nil {
 		return nil, err
 	}

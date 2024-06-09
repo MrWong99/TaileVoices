@@ -20,7 +20,6 @@ const (
 )
 
 var discordEncoder *opus.Encoder
-var discordDecoder *opus.Decoder
 
 func init() {
 	var err error
@@ -31,11 +30,6 @@ func init() {
 	}
 	discordEncoder.SetBitrateToAuto()
 	discordEncoder.SetMaxBandwidth(opus.Fullband)
-	discordDecoder, err = opus.NewDecoder(discordAudioSampleRate, discordAudioChannels)
-	if err != nil {
-		slog.Error("could not create opus decoder for Discord audio data", "error", err)
-		os.Exit(1)
-	}
 }
 
 func isVoiceChannel(s *discordgo.Session, channelID string) bool {

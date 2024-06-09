@@ -1,0 +1,1 @@
+This is a pen and paper session with players {{ range $uid, $name := .Players }}{{ $name }},{{ end }} and NPCs {{ range .Actors }}{{ .Name }},{{ end }}.
