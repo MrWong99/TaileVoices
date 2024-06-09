@@ -26,7 +26,7 @@ const (
 const (
 	clientStartupTimeout = 3 * time.Second
 	textChunkSize        = 200
-	chunkRequestLimit    = 3000 / textChunkSize
+	chunkRequestLimit    = 1600 / textChunkSize
 )
 
 var defaultClient *Client
