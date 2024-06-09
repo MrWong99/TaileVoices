@@ -51,7 +51,7 @@ func TestStoreAndRetrieve(t *testing.T) {
 		t.Fatalf("could not get chunk index: %v", err)
 	}
 
-	if index != 97 {
+	if index != 86 {
 		t.Errorf("expected highest index to be 97 and not %d", index)
 	}
 

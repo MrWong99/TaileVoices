@@ -26,7 +26,6 @@ const (
 const (
 	clientStartupTimeout = 3 * time.Second
 	textChunkSize        = 200
-	textChunkOverlap     = 50
 	chunkRequestLimit    = 3000 / textChunkSize
 )
 
@@ -64,14 +63,25 @@ func NewClient(scheme, addr string) (*Client, error) {
 
 // StoreText in the vector db. The text will automatically be chunked.
 func (c *Client) StoreText(collectionName, text string) error {
-	words := strings.Split(strings.TrimSpace(text), " ")
-	chunks := make([]string, 0, len(words)/textChunkSize)
-	for i := 0; i < len(words); i = i + textChunkSize - textChunkOverlap {
-		if i < len(words)-textChunkSize {
-			chunks = append(chunks, strings.Join(words[i:i+textChunkSize], " "))
-			continue
+	trimmedText := strings.TrimSpace(text)
+	lines := strings.Split(trimmedText, "\n")
+	allWordCount := len(strings.Split(trimmedText, " "))
+	chunks := make([]string, 0, allWordCount+10/textChunkSize)
+
+	currentChunk := make([]string, 0, textChunkSize)
+	lastLine := ""
+	for _, line := range lines {
+		lineWords := strings.Split(line, " ")
+		if len(currentChunk)+len(lineWords) > textChunkSize {
+			chunks = append(chunks, lastLine+strings.Join(currentChunk, " "))
+			currentChunk = make([]string, 0, textChunkSize)
 		}
-		chunks = append(chunks, strings.Join(words[i:], " "))
+		currentChunk = append(currentChunk, lineWords...)
+		currentChunk[len(currentChunk)-1] += "\n"
+		lastLine = line + "\n"
+	}
+	if len(currentChunk) > 0 {
+		chunks = append(chunks, lastLine+strings.Join(currentChunk, " "))
 	}
 
 	highestCurrentIndex := 0
@@ -185,4 +195,32 @@ func (c *Client) PromptText(collectionName, prompt string, searchConcepts ...str
 	}
 	groupedResult := generate["groupedResult"].(string)
 	return groupedResult, nil
+}
+
+// SearchTranscripts for specified collection agains the search concepts. Returns a limited amount of stored chunk data.
+func (c *Client) SearchTranscripts(collectionName string, searchConcepts ...string) ([]string, error) {
+	res, err := c.wc.GraphQL().Get().
+		WithClassName(collectionName).
+		WithFields(graphql.Field{Name: string(Chunk)}).
+		WithNearText(c.wc.GraphQL().NearTextArgBuilder().WithConcepts(searchConcepts)).
+		WithLimit(chunkRequestLimit).
+		Do(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	if len(res.Errors) > 0 {
+		for _, e := range res.Errors {
+			err = errors.Join(err, errors.New(e.Message))
+		}
+		return nil, err
+	}
+
+	get := res.Data["Get"].(map[string]interface{})
+	col := get[collectionName].([]interface{})
+	allLines := make([]string, len(col))
+	for i, data := range col {
+		mapData := data.(map[string]interface{})
+		allLines[i] = mapData[string(Chunk)].(string)
+	}
+	return allLines, nil
 }
