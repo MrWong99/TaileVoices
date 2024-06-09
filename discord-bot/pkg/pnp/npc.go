@@ -12,6 +12,7 @@ import (
 
 	"github.com/MrWong99/TaileVoices/discord_bot/pkg/oai"
 	"github.com/sashabaranov/go-openai"
+	"gopkg.in/yaml.v3"
 )
 
 //go:embed npc_system_prompt.tpl
@@ -61,15 +62,38 @@ func init() {
 // Actor that plays autonomously in a voice conversation. You must use the NewActor init function or else most methods won't work properly.
 type Actor struct {
 	// Name of the actor. This will be used as his identity. Can be mutliple names separated by spaces.
-	Name string
+	Name string `yaml:"name"`
 	// Aliases that this actor should also react to.
-	Aliases []string
+	Aliases []string `yaml:"aliases"`
 	// Script that the actor should follow. Should include info about his behaviour, the pen and paper world setting and all other characters he knows.
-	Script string
+	Script string `yaml:"script"`
 	// Voice that this actor should use when speaking.
-	Voice           openai.SpeechVoice
+	Voice           openai.SpeechVoice `yaml:"voice"`
 	namesAndAliases []string
 	systemPrompt    string
+}
+
+type tmpActor struct {
+	Name    string             `yaml:"name"`
+	Aliases []string           `yaml:"aliases"`
+	Script  string             `yaml:"script"`
+	Voice   openai.SpeechVoice `yaml:"voice"`
+}
+
+// UnmarshalYAML implements the unmarshalling including the required initialization.
+func (a *Actor) UnmarshalYAML(value *yaml.Node) error {
+	var tmp tmpActor
+
+	if err := value.Decode(&tmp); err != nil {
+		return err
+	}
+
+	a.Name = tmp.Name
+	a.Aliases = tmp.Aliases
+	a.Script = tmp.Script
+	a.Voice = tmp.Voice
+	a.init()
+	return nil
 }
 
 // NewActor to integrate into a campaign.
@@ -80,15 +104,20 @@ func NewActor(name, script string, voice openai.SpeechVoice, aliases ...string) 
 		Aliases: aliases,
 		Voice:   voice,
 	}
-	nameSplits := strings.Split(name, " ")
-	a.namesAndAliases = make([]string, len(nameSplits)+len(aliases))
+	a.init()
+	return &a
+}
+
+func (a *Actor) init() {
+	nameSplits := strings.Split(a.Name, " ")
+	a.namesAndAliases = make([]string, len(nameSplits)+len(a.Aliases))
 	i := 0
 	for _, namePart := range nameSplits {
 		cleanPart := removeNonWordRunes(namePart)
 		a.namesAndAliases[i] = strings.ToLower(cleanPart)
 		i++
 	}
-	for _, alias := range aliases {
+	for _, alias := range a.Aliases {
 		cleanPart := removeNonWordRunes(alias)
 		a.namesAndAliases[i] = strings.ToLower(cleanPart)
 		i++
@@ -99,7 +128,6 @@ func NewActor(name, script string, voice openai.SpeechVoice, aliases ...string) 
 		panic(err)
 	}
 	a.systemPrompt = systemPromptBuf.String()
-	return &a
 }
 
 type PromptContext struct {
