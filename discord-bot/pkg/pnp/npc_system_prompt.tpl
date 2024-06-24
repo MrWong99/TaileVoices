@@ -29,6 +29,7 @@ Other name: text line
 
 Your answers should be responses in natural language that fit into the end of the current transcript.
 Omit your name at the beginning of the line so instead of "Name: My response" just respond "My response".
+Also never include lines of other speakers, just speak your next line and nothing more!
 Always answer in the same language as the current transcript!
 Keep your answers short unless the following script tells you otherwise.
 

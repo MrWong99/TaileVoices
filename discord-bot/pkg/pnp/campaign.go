@@ -2,6 +2,7 @@ package pnp
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -9,11 +10,16 @@ import (
 	"sync"
 	"text/template"
 
+	"github.com/MrWong99/TaileVoices/discord_bot/pkg/oai"
 	"github.com/MrWong99/TaileVoices/discord_bot/pkg/vecdb"
+	"github.com/sashabaranov/go-openai"
 	"gopkg.in/yaml.v3"
 
 	_ "embed"
 )
+
+//go:embed summarization_prompt.txt
+var summarizationPrompt string
 
 //go:embed stt_init_prompt.tpl
 var sttPromptText string
@@ -186,11 +192,9 @@ func (c *Campaign) HandleText(name string, segment string) {
 	}
 
 	go func() {
-		c.transcriptMu.Lock()
 		promptContext := PromptContext{
-			CurrentTranscript: c.CurrentSessionTranscript,
+			CurrentTranscript: c.CurrentTranscript(),
 		}
-		c.transcriptMu.Unlock() // don't defer as it will be a deadlock once c.HandleText() is called
 		oldTranscripts, err := c.dbClient.SearchTranscripts(c.Name, segment)
 		if err != nil {
 			slog.Warn("could not search old transcripts for reference", "error", err, "collection", c.Name, "concept", segment)
@@ -208,6 +212,37 @@ func (c *Campaign) HandleText(name string, segment string) {
 		}
 		c.HandleText(nextActor.Name, result)
 	}()
+}
+
+// Summary of the current campaign transcript. Excludes all non pen & paper related content.
+// Uses a GenAI to do the summary.
+//
+// Can be called after Close() has been called.
+func (c *Campaign) Summary() (string, error) {
+	resp, err := oai.Client.CreateChatCompletion(context.Background(), openai.ChatCompletionRequest{
+		Model: openai.GPT4o,
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleSystem,
+				Content: summarizationPrompt,
+			},
+			{
+				Role:    openai.ChatMessageRoleUser,
+				Content: c.CurrentTranscript(),
+			},
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create chat completion: %w", err)
+	}
+	return resp.Choices[0].Message.Content, nil
+}
+
+// CurrentTranscript of this session.
+func (c *Campaign) CurrentTranscript() string {
+	c.transcriptMu.Lock()
+	defer c.transcriptMu.Unlock()
+	return c.CurrentSessionTranscript
 }
 
 // Close this campaigns session by closing C() and storing its transcript in the vector database.

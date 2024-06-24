@@ -185,6 +185,14 @@ func campaignHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				if err := campaign.Close(); err != nil {
 					slog.Warn("unexpected error while stopping campaign", "campaign", campaign.Name, "error", err)
 				}
+				summary, err := campaign.Summary()
+				if err != nil {
+					slog.Warn("could not summarize campaign transcript", "error", err)
+				} else {
+					s.InteractionResponseEdit(respI, &discordgo.WebhookEdit{
+						Content: &summary,
+					})
+				}
 				// Cleanup
 				close(componentButtons[i.GuildID]["stop_campaign"])
 				delete(componentButtons[i.GuildID], "stop_campaign")
@@ -193,7 +201,7 @@ func campaignHandler(s *discordgo.Session, i *discordgo.InteractionCreate) {
 			s.InteractionRespond(respI, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseUpdateMessage,
 				Data: &discordgo.InteractionResponseData{
-					Content: "Transcript finished",
+					Content: "Transcript finished.",
 					Files: []*discordgo.File{
 						{
 							Name:        "transcript.txt",
