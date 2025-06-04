@@ -109,7 +109,7 @@ func Resample(input *AudioInput, output *AudioOutput) error {
 		allArgs = append(allArgs, "-f", strings.ToLower(input.Format.String()))
 	}
 	if (input.Format == F32le || input.Format == S16le) && !input.NoArgs {
-		allArgs = append(allArgs, "-ac", stringify(input.Channels), "-ar", stringify(input.Channels))
+		allArgs = append(allArgs, "-ac", stringify(input.Channels), "-ar", stringify(input.SampleRate))
 	}
 	allArgs = append(allArgs, "-i", "pipe:")
 	allArgs = append(allArgs, outArgs...)
