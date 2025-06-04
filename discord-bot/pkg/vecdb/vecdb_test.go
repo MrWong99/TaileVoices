@@ -52,7 +52,7 @@ func TestStoreAndRetrieve(t *testing.T) {
 	}
 
 	if index != 86 {
-		t.Errorf("expected highest index to be 97 and not %d", index)
+		t.Errorf("expected highest index to be 86 and not %d", index)
 	}
 
 	result, err := DefaultClient().PromptText(colName, "Was hat Amon an diesem Tag alles erledigt? Antworte in ganz kurzen Stichpunkten!", "Amon")
