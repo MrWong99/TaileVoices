@@ -26,8 +26,8 @@ const (
 	Opus AudioFormat = iota
 	// F32le is a 32bit floating point slice with little endianess (like []float32).
 	F32le
-	// S16le is a 316bit signed integer slice with little endianess (like []uint16).
-	S16le
+       // S16le is a 16bit signed integer slice.
+       S16le
 	// Wav file format.
 	Wav
 	// Mp3 file format.
